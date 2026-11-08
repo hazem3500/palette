@@ -215,15 +215,43 @@ function baselines() {
   };
 }
 
+const BORDER_SIDES = ["top", "right", "bottom", "left", "block-start", "block-end", "inline-start", "inline-end"] as const;
+
+/**
+ * Drop border and outline longhands that do not paint. Tailwind's preflight (and similar
+ * resets) set `border-style: solid` with `border-width: 0`, which differs from a bare tag's
+ * `none` baseline. Serialising those into an SVG foreignObject makes engines draw faint gray
+ * boxes that are not on the page.
+ */
+export function omitInvisibleFrameStyles(styles: Map<string, string>) {
+  for (const side of BORDER_SIDES) {
+    const style = styles.get(`border-${side}-style`);
+    const width = styles.get(`border-${side}-width`);
+    if (style === "none" || style === "hidden" || width === "0px") {
+      styles.delete(`border-${side}-style`);
+      styles.delete(`border-${side}-width`);
+      styles.delete(`border-${side}-color`);
+    }
+  }
+  const outlineStyle = styles.get("outline-style");
+  const outlineWidth = styles.get("outline-width");
+  if (outlineStyle === "none" || outlineStyle === "hidden" || outlineWidth === "0px") {
+    for (const name of [...styles.keys()]) if (name.startsWith("outline")) styles.delete(name);
+  }
+}
+
 /** Declarations that differ from the tag's default or from what the parent passes down. */
 function declarations(computed: CSSStyleDeclaration, base: Map<string, string>, parent?: CSSStyleDeclaration) {
-  let css = "";
+  const styles = new Map<string, string>();
   for (let i = 0; i < computed.length; i++) {
     const name = computed[i]!;
     if (name.startsWith("--")) continue;
     const value = computed.getPropertyValue(name);
-    if (value !== base.get(name) || (parent && value !== parent.getPropertyValue(name))) css += `${name}:${value};`;
+    if (value !== base.get(name) || (parent && value !== parent.getPropertyValue(name))) styles.set(name, value);
   }
+  omitInvisibleFrameStyles(styles);
+  let css = "";
+  for (const [name, value] of styles) css += `${name}:${value};`;
   return css;
 }
 
