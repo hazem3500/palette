@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initComments } from "../src/index";
-import { captureSnapshot, HTML_LIMIT, noteComment, PLACEHOLDER, skipped, snapshotFor, snapshotHtml } from "../src/snapshot";
+import {
+  captureSnapshot,
+  HTML_LIMIT,
+  noteComment,
+  omitInvisibleFrameStyles,
+  PLACEHOLDER,
+  skipped,
+  snapshotFor,
+  snapshotHtml,
+} from "../src/snapshot";
 import type { CommentsController, CommentsOptions } from "../src/types";
 
 const fixture = (html: string) => {
@@ -14,6 +23,57 @@ const fixture = (html: string) => {
 afterEach(() => {
   document.body.replaceChildren();
   localStorage.clear();
+});
+
+describe("omitInvisibleFrameStyles", () => {
+  it("drops zero-width solid borders from Tailwind-style preflight", () => {
+    const styles = new Map([
+      ["color", "rgb(255, 255, 255)"],
+      ["border-top-style", "solid"],
+      ["border-top-width", "0px"],
+      ["border-top-color", "rgb(60, 57, 60)"],
+      ["border-right-style", "solid"],
+      ["border-right-width", "0px"],
+      ["border-right-color", "rgb(60, 57, 60)"],
+      ["border-bottom-style", "solid"],
+      ["border-bottom-width", "0px"],
+      ["border-bottom-color", "rgb(60, 57, 60)"],
+      ["border-left-style", "solid"],
+      ["border-left-width", "0px"],
+      ["border-left-color", "rgb(60, 57, 60)"],
+    ]);
+    omitInvisibleFrameStyles(styles);
+    expect([...styles.keys()]).toEqual(["color"]);
+  });
+
+  it("keeps painted borders and drops only the invisible side", () => {
+    const styles = new Map([
+      ["border-top-style", "solid"],
+      ["border-top-width", "2px"],
+      ["border-top-color", "rgb(255, 0, 0)"],
+      ["border-bottom-style", "solid"],
+      ["border-bottom-width", "0px"],
+      ["border-bottom-color", "rgb(60, 57, 60)"],
+    ]);
+    omitInvisibleFrameStyles(styles);
+    expect(styles.get("border-top-width")).toBe("2px");
+    expect(styles.get("border-top-color")).toBe("rgb(255, 0, 0)");
+    expect(styles.has("border-bottom-style")).toBe(false);
+    expect(styles.has("border-bottom-width")).toBe(false);
+    expect(styles.has("border-bottom-color")).toBe(false);
+  });
+
+  it("drops outline longhands when the outline does not paint", () => {
+    const styles = new Map([
+      ["outline-style", "none"],
+      ["outline-width", "2px"],
+      ["outline-color", "rgb(12, 147, 245)"],
+      ["outline-offset", "2px"],
+      ["color", "rgb(0, 0, 0)"],
+    ]);
+    omitInvisibleFrameStyles(styles);
+    expect([...styles.keys()]).toEqual(["color"]);
+  });
 });
 
 describe("snapshot HTML", () => {
