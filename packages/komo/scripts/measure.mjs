@@ -227,7 +227,10 @@ await writeFile(
 // standalone); the frame bridge and shell claim are published and read under both names; Palette's own classes,
 // custom properties and events say palette (+757: 248,940 -> 249,697 measured on main 756ac1d, initial +629),
 // plus CI margin.
-if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 249_850)
+// 249,850 -> 250,200: strip invisible border/outline longhands from comment snapshots (#212). On-demand
+// snapshot chunk +194 gzip (4,560 -> 4,754); coreFeatures 249,849 -> 250,058 on the failed publish of that
+// merge, plus CI margin.
+if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 250_200)
   throw new Error("Palette exceeds its core production consumer bundle budget.");
 // The inline-text feature adds a small button/state bridge to the optional
 // Design mode entry. Its editor remains a separate on-demand chunk below.
@@ -323,7 +326,9 @@ if (report.optionalGeometry.gzip > 14_400)
 if (report.optionalAccountTokens.gzip > 5_850)
   throw new Error("Palette's API tokens chunk exceeds its gzip budget.");
 // Comment snapshots (SVG foreignObject image, trimmed HTML, raw-file uploads) load only when snapshots are on, the server supports them and a reviewer starts a comment. 4,561 measured, plus ~3%.
-if (report.optionalSnapshots.gzip > 4_700)
+// 4,700 -> 4,900: drop invisible border/outline longhands before foreignObject serialisation (#212);
+// 4,754 measured on the failed publish of that merge, plus ~3%.
+if (report.optionalSnapshots.gzip > 4_900)
   throw new Error("Palette's comment snapshot chunk exceeds its gzip budget.");
 // Saved snapshots in the review UI (row thumbnails, the open card, the viewer, HTML as text) load the first time one is shown. 4,046 measured, plus ~3%.
 if (report.optionalSnapshotView.gzip > 4_200)
