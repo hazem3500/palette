@@ -137,6 +137,7 @@ export function initComments(options: CommentsOptions): CommentsController {
   const noop: CommentsController = {
     destroy() {},
     open() {},
+    restore() {},
     close() {},
     comment() {},
     async refresh() {},
@@ -825,7 +826,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     if (shellMoving) return;
     shellMoving = true;
     frameControls?.status({ active: false, loading: true });
-    // A remembered Frame reopening on load has nothing to lose yet; otherwise ask first.
+    // A remembered Frame reopening on load has nothing to lose yet; otherwise ask when Design has unposted changes.
     void shellMode().then(({ enterShell }) =>
       !destroyed && enterShell(options.project, ask, !!designController?.edited, (reason) => {
         if (destroyed) return;
@@ -6866,13 +6867,14 @@ export function initComments(options: CommentsOptions): CommentsController {
       history.replaceState(history.state, "", url);
       return;
     }
-    const thread = threads.find((t) => t.id === id);
-    if (!thread || threadRequest?.pending) return;
-    if (threadRequest?.id !== thread.id) {
+    if (threadRequest?.pending) return;
+    // Remember the link before the comments load: a host redirect can drop the query first.
+    if (id && threadRequest?.id !== id) {
       cancelThreadRequest();
-      threadRequest = { id: thread.id, inspect: url.searchParams.get("comment-view") === "design", pending: false, rejected: false };
+      threadRequest = { id, inspect: url.searchParams.get("comment-view") === "design", pending: false, rejected: false };
     }
-    await openRequestedThread(threadRequest);
+    const request = threadRequest;
+    if (request && !request.opened && threads.some((t) => t.id === request.id)) await openRequestedThread(request);
   }
   function syncSession() {
     const next = new CommentsApi(options);
@@ -7083,6 +7085,10 @@ export function initComments(options: CommentsOptions): CommentsController {
       if (destroyed) return;
       restoreToolbar();
       toggleExpanded(true);
+    },
+    restore() {
+      if (destroyed || !toolbarDismissed) return;
+      restoreToolbar();
     },
     close() {
       if (destroyed) return;

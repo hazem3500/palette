@@ -28,15 +28,16 @@ export function leaveShellPage(href: string, reason = "") {
 }
 
 /**
- * Reloads this page as the shell. `ask` confirms first; `fallback` runs when the
- * reviewer cancels, storage is blocked, or the page didn't unload (the
- * app's own unsaved-changes guard can keep it).
+ * Reloads this page as the shell. With `ask`, it confirms only when `edited` (unposted
+ * Design changes would be lost); the app's own unsaved-changes guard covers app state.
+ * `fallback` runs when the reviewer cancels, storage is blocked, or the page didn't
+ * unload (that guard can keep it).
  */
 export function enterShell(project: string, ask: boolean, edited: boolean, fallback: (reason: string) => void) {
   try {
     const reason = sessionStorage.getItem("palette:shell-off");
     if (reason) return fallback(reason);
-    if (ask && !confirm(`Reload in Frame?\n\nUnsaved app changes${edited ? " and unposted Design changes" : ""} will be lost.`))
+    if (ask && edited && !confirm("Reload in Frame?\n\nUnposted Design changes will be lost."))
       return fallback("Reload cancelled.");
     const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
     sessionStorage.setItem(KEY, JSON.stringify({ v: 1, project, nonce, origin: location.origin }));

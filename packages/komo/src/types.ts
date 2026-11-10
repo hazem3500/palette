@@ -363,6 +363,8 @@ export interface CommentsController {
   comment(element: Element): void;
   destroy(): void;
   open(): void;
+  /** Bring back a toolbar the reviewer dismissed, without opening the sidebar. */
+  restore(): void;
   close(): void;
   refresh(): Promise<void>;
 }

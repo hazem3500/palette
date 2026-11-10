@@ -282,3 +282,32 @@ it.each([false, true])("opens a deep link on load with restored sidebar %s and c
   expect(location.pathname + location.search).toBe("/other?tab=2");
   expect(history.state).toEqual({ keep: 1 });
 });
+
+it("opens a deep link whose param a host redirect dropped before the comments loaded", async () => {
+  const cache = Object.keys(localStorage).find((key) => key.endsWith(":threads"))!;
+  const { threads } = JSON.parse(localStorage.getItem(cache)!);
+  localStorage.removeItem(cache);
+  let respond!: () => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: URL) =>
+      url.pathname.endsWith("/config")
+        ? Promise.resolve(Response.json({ google: false, github: false, guests: true, guestResolve: false }))
+        : url.pathname.endsWith("/me")
+          ? Promise.resolve(Response.json({ user: { id: "reviewer", name: "Reviewer", verified: true } }))
+          : url.pathname.endsWith("/threads")
+            ? new Promise<Response>((resolve) => (respond = () => resolve(Response.json({ threads, next: null }))))
+            : new Promise<Response>(() => {}),
+    ),
+  );
+  history.replaceState(null, "", "/?comment=away");
+  const { title } = mount();
+  // The host's router lands on its default route and drops the query.
+  history.replaceState(null, "", "/home");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await vi.waitFor(() => expect(respond).toBeDefined());
+  respond();
+  await vi.waitFor(() => expect(title()).toBe("Other page thread"));
+  expect(location.pathname + location.search).toBe("/home");
+});
