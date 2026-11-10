@@ -120,14 +120,14 @@ let seen: unknown[] | undefined;
 /** The last scan: classes found, style rules seen, and whether a sheet was unreadable or a <link> pending. */
 let scan: [found: Set<string>, rules: number, unreadable: boolean, pending: boolean] = [new Set(), 0, false, false];
 
-const documentSheets = () => [...document.styleSheets, ...(document.adoptedStyleSheets ?? [])];
+const documentSheets = (page: Document) => [...page.styleSheets, ...(page.adoptedStyleSheets ?? [])];
 
 /**
  * Changes when a sheet is added, removed or replaced (a <style>'s text changed),
  * its rule count changes, or a <link> stylesheet loads.
  */
-function sheetKey(sheets = documentSheets()): unknown[] {
-  const key: unknown[] = [...document.querySelectorAll<HTMLLinkElement>("link[rel~=stylesheet]:not([disabled])")].map((link) => link.sheet);
+function sheetKey(page: Document, sheets = documentSheets(page)): unknown[] {
+  const key: unknown[] = [...page.querySelectorAll<HTMLLinkElement>("link[rel~=stylesheet]:not([disabled])")].map((link) => link.sheet);
   for (const sheet of sheets) {
     let count;
     try {
@@ -146,20 +146,21 @@ const touchesSheets = (record: MutationRecord) =>
   isSheet(record.target) || isSheet(record.target.parentNode) ||
   [...record.addedNodes, ...record.removedNodes].some((node) => isSheet(node) || !!(node as Element).querySelector?.("style,link"));
 
-/** Calls `onChange` when the stylesheets' key changes, while subscribed; nothing runs between DOM changes. */
-function watchSheets(onChange: () => void): () => void {
-  let last = sheetKey();
+/** Calls `onChange` when `target`'s stylesheets' key changes, while subscribed; nothing runs between DOM changes. */
+function watchSheets(onChange: () => void, target?: PreviewTarget): () => void {
+  const page = target?.document ?? document;
+  let last = sheetKey(page);
   const check = () => {
-    const key = sheetKey();
+    const key = sheetKey(page);
     if (sameKey(key, last)) return;
     last = key;
     onChange();
   };
   const observer = new MutationObserver((records) => records.some(touchesSheets) && check());
   const events = new AbortController();
-  observer.observe(document, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["disabled", "media", "rel", "href"] });
+  observer.observe(page, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["disabled", "media", "rel", "href"] });
   // <link> load and error events don't bubble, so they are caught on the way down.
-  for (const type of ["load", "error"]) document.addEventListener(type, check, { capture: true, signal: events.signal });
+  for (const type of ["load", "error"]) page.addEventListener(type, check, { capture: true, signal: events.signal });
   return () => {
     observer.disconnect();
     events.abort();
@@ -167,14 +168,14 @@ function watchSheets(onChange: () => void): () => void {
 }
 
 /**
- * Escaped class names with a rule in the document, or null when Palette cannot tell:
+ * Escaped class names with a rule in `page`, or null when Palette cannot tell:
  * a <link> stylesheet is still loading or failed, no readable sheet has a style rule,
  * or, with `strict`, any sheet (or @import) is unreadable.
  */
-function generatedClasses(strict: boolean): Set<string> | null {
+function generatedClasses(strict: boolean, page: Document): Set<string> | null {
   // Re-scan only when the stylesheets' key changes.
-  const sheets = documentSheets();
-  const key = sheetKey(sheets);
+  const sheets = documentSheets(page);
+  const key = sheetKey(page, sheets);
   // The first call always scans: a page with no sheets has an empty key too.
   if (!seen || !sameKey(key, seen)) {
     seen = key;
@@ -289,9 +290,9 @@ export function tailwindTokens(table: TailwindTable, options: TailwindTokensOpti
 
   return {
     id: "tailwind",
-    list(theme) {
+    list(theme, target) {
       const state = theme ?? Object.fromEntries((options.themes ?? []).map((axis) => [axis.id, axis.current()]));
-      const present = options.onlyGenerated ? generatedClasses(options.onlyGenerated !== true && !!options.onlyGenerated.strict) : null;
+      const present = options.onlyGenerated ? generatedClasses(options.onlyGenerated !== true && !!options.onlyGenerated.strict, target?.document ?? document) : null;
       return entries.filter(({ token, classes }) => (!present || present.has(CSS.escape(classes[0]))) && (!options.filter || options.filter(token))).map(({ token, classes }): DesignToken => ({
         path: token.path,
         type: token.type,

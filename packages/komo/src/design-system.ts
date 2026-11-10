@@ -101,8 +101,12 @@ export interface PreviewTarget {
 export interface TokenAdapter {
   /** Stable id recorded on proposals, e.g. "css-variables" or "tailwind". */
   id: string;
-  /** Every token, with values for `theme` (the current theme state when omitted). */
-  list(theme?: ThemeState): DesignToken[] | Promise<DesignToken[]>;
+  /**
+   * Every token, with values for `theme` (the current theme state when omitted).
+   * `target` is the page Palette reviews: Frame's viewport iframe while it shows the
+   * page, else this document. An adapter that reads the page reads it there.
+   */
+  list(theme?: ThemeState, target?: PreviewTarget): DesignToken[] | Promise<DesignToken[]>;
   /**
    * Which token each CSS property of `element` uses, or its off-token value.
    * Return only properties the app can vouch for; Palette shows nothing for the rest.
@@ -136,9 +140,10 @@ export interface TokenAdapter {
    * return something different, and stop when the returned function runs. Palette
    * subscribes once Design mode shows tokens; on each call it lists again and
    * refreshes chips, proposals and open pickers. Without it, `list()` runs once
-   * per theme state.
+   * per theme state. `target` is the page `list()` reads; when Frame shows another
+   * document, Palette stops this subscription and subscribes again with it.
    */
-  subscribe?(onChange: () => void): () => void;
+  subscribe?(onChange: () => void, target?: PreviewTarget): () => void;
 }
 
 /** Theme state: axis id → option id, e.g. { mode: "dark", product: "docs" }. */

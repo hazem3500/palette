@@ -1,7 +1,7 @@
 import { previewStyle } from "./design-popup.js";
 import { inlineStyleSnapshot } from "./design-preview.js";
 import { isDesignTarget } from "./design-target.js";
-import { previewTarget } from "./frame-target.js";
+import { eachFrameDocument, previewTarget } from "./frame-target.js";
 // Design mode's side of an app's TokenAdapter: cached token lists, per-element
 // token swaps with their undo, Before/After, and the proposal text. Loaded with
 // the token controls, never at startup.
@@ -181,20 +181,37 @@ export function watchTokenList(adapter: TokenAdapter | undefined, update: () => 
   if (!adapter?.subscribe || signal.aborted) return;
   // Changes made while nobody was subscribed went unreported.
   lists.delete(adapter);
-  try {
-    const stop = adapter.subscribe(() => {
-      // Only a list that changed refreshes, so a report caused by Palette's own previews keeps open
-      // popups and rows. Every watcher of one report compares with the lists from before it.
-      const before = reported.get(adapter) ?? lists.get(adapter);
-      reported.set(adapter, before);
-      queueMicrotask(() => reported.delete(adapter));
-      lists.delete(adapter);
-      void Promise.all([...before ?? []].map(([key, list]) => Promise.all([list, listTokens(adapter, Object.fromEntries(JSON.parse(key)))])
-        .then(([old, next]) => JSON.stringify(old) === JSON.stringify(next))))
-        .then(same => same.length && same.every(Boolean) || update(), update);
-    });
-    signal.addEventListener("abort", () => { try { stop(); } catch { /* Ignore a failing unsubscribe. */ } }, { once: true });
-  } catch { /* An adapter whose subscribe() throws keeps its cached lists. */ }
+  const changed = () => {
+    // Only a list that changed refreshes, so a report caused by Palette's own previews keeps open
+    // popups and rows. Every watcher of one report compares with the lists from before it.
+    const before = reported.get(adapter) ?? lists.get(adapter);
+    reported.set(adapter, before);
+    queueMicrotask(() => reported.delete(adapter));
+    lists.delete(adapter);
+    void Promise.all([...before ?? []].map(([key, list]) => Promise.all([list, listTokens(adapter, Object.fromEntries(JSON.parse(key)))])
+      .then(([old, next]) => JSON.stringify(old) === JSON.stringify(next))))
+      .then(same => same.length && same.every(Boolean) || update(), update);
+  };
+  let page: Document | undefined;
+  let stop: (() => void) | undefined;
+  const unsubscribe = () => { try { stop?.(); } catch { /* Ignore a failing unsubscribe. */ } stop = undefined; };
+  // Subscribe for the page's current document; report a change when that document is new.
+  const follow = () => {
+    const target = previewTarget();
+    if (signal.aborted || target.document === page) return;
+    const moved = page !== undefined;
+    unsubscribe();
+    page = target.document;
+    try { stop = adapter.subscribe!(changed, target); } catch { /* An adapter whose subscribe() throws keeps its cached lists. */ }
+    if (moved) changed();
+  };
+  follow();
+  // Frame's viewport iframe shows the page in its own document, and this one again when it goes.
+  eachFrameDocument((_, gone) => {
+    follow();
+    gone.addEventListener("abort", () => queueMicrotask(follow), { once: true });
+  }, signal);
+  signal.addEventListener("abort", unsubscribe, { once: true });
 }
 
 /** `list()` runs once per adapter and theme state, until a subscribed adapter reports a change; a failed call is retried next time. */
@@ -205,7 +222,7 @@ export function listTokens(adapter: TokenAdapter, theme: ThemeState = {}): Promi
   let tokens = cache.get(key);
   if (!tokens) {
     tokens = Promise.resolve()
-      .then(() => adapter.list(Object.keys(theme).length ? theme : undefined))
+      .then(() => adapter.list(Object.keys(theme).length ? theme : undefined, previewTarget()))
       .then((list) => (Array.isArray(list) ? list.filter((token) => token && typeof token.path === "string") : []));
     tokens.catch(() => cache.delete(key));
     cache.set(key, tokens);
