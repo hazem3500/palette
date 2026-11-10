@@ -74,6 +74,35 @@ describe("omitInvisibleFrameStyles", () => {
     omitInvisibleFrameStyles(styles);
     expect([...styles.keys()]).toEqual(["color"]);
   });
+
+  it("reads the full computed width when the zero width matches the tag default", () => {
+    // A div's default is `none` + `0px`, so only the preflight `solid` differs and lands in the map.
+    const computed = new Map([
+      ["border-top-style", "solid"],
+      ["border-top-width", "0px"],
+    ]);
+    const styles = new Map([["border-top-style", "solid"]]);
+    const base = new Map([
+      ["border-top-style", "none"],
+      ["border-top-width", "0px"],
+    ]);
+    omitInvisibleFrameStyles(styles, (name) => computed.get(name), base);
+    expect([...styles.keys()]).toEqual([]);
+  });
+
+  it("writes none when the tag default would paint a border back", () => {
+    const styles = new Map([
+      ["border-top-style", "solid"],
+      ["border-top-width", "0px"],
+      ["border-top-color", "rgb(229, 231, 235)"],
+    ]);
+    const base = new Map([
+      ["border-top-style", "outset"],
+      ["border-top-width", "2px"],
+    ]);
+    omitInvisibleFrameStyles(styles, (name) => styles.get(name), base);
+    expect([...styles]).toEqual([["border-top-style", "none"]]);
+  });
 });
 
 describe("snapshot HTML", () => {
