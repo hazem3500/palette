@@ -113,7 +113,7 @@ describe("Design panel theme switcher", () => {
     // Axes receive the reviewed page, this document unless Frame shows a viewport iframe.
     expect(mode.apply).toHaveBeenCalledWith("dark", { document, root: document.documentElement });
     await vi.waitFor(() => expect(option("color.text.secondary")?.title).toContain("#a3a3a3"));
-    expect(tokens.list).toHaveBeenLastCalledWith({ mode: "dark" });
+    expect(tokens.list).toHaveBeenLastCalledWith({ mode: "dark" }, { document, root: document.documentElement });
     expect(field().querySelector(".design-token-chip")!.textContent).toBe("Uses color.text.secondary");
     expect(toggle().getAttribute("aria-label")).toBe("Theme: Dark");
     // Focus follows the switch across the re-render.

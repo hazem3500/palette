@@ -369,7 +369,7 @@ describe("custom token adapter in Design mode", () => {
     await open({ tokens: adapter, themes: [{ id: "mode", options: [{ id: "light" }, { id: "dark" }], current: () => mode, apply: (id) => { mode = id; } }] });
     expect(field("color").querySelector(".design-token-chip")?.textContent).toBe("Uses color.text.secondary");
     expect(adapter.list).toHaveBeenCalledTimes(1);
-    expect(adapter.list).toHaveBeenCalledWith({ mode: "light" });
+    expect(adapter.list).toHaveBeenCalledWith({ mode: "light" }, { document, root: document.documentElement });
     await listTokens(adapter, { mode: "light" });
     expect(adapter.list).toHaveBeenCalledTimes(1);
     await listTokens(adapter, { mode: "dark" });

@@ -2,6 +2,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tailwindSpacing, tailwindTokens, type TailwindToken } from "../src/adapters/tailwind.js";
 import type { DesignToken } from "../src/design-system.js";
+import { setPageFrame } from "../src/frame-target.js";
+import { listTokens, watchTokenList } from "../src/token-adapter.js";
 
 const token = (name: string, extra: Partial<TailwindToken> = {}): TailwindToken => ({ path: `t.${name}`, type: "dimension", class: name, properties: ["padding"], value: "1px", ...extra });
 const paths = (tokens: TailwindToken[], options: Parameters<typeof tailwindTokens>[1] = { onlyGenerated: true }) =>
@@ -173,6 +175,36 @@ describe("tailwindTokens onlyGenerated", () => {
     wrapper.remove();
     await tick();
     expect(onChange).toHaveBeenCalledTimes(4);
+  });
+
+  it("reads the app's stylesheets in Frame's viewport iframe, not the shell's, and follows the frame in and out", async () => {
+    // The shell page holds Palette's own rules; the framed app holds its utilities.
+    style(".palette-toolbar{display:flex}");
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    const app = iframe.contentDocument!;
+    const appStyle = (css: string) => app.head.append(Object.assign(app.createElement("style"), { textContent: css }));
+    appStyle(".p-4{padding:16px}");
+    const adapter = tailwindTokens({ tokens: [token("p-4"), token("p-9"), token("palette-toolbar")] }, { onlyGenerated: true });
+    const update = vi.fn();
+    const watching = new AbortController();
+    try {
+      expect((await listTokens(adapter)).map((item) => item.path)).toEqual(["t.palette-toolbar"]);
+      watchTokenList(adapter, update, watching.signal);
+      setPageFrame(iframe);
+      await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+      expect((await listTokens(adapter)).map((item) => item.path)).toEqual(["t.p-4"]);
+      // A sheet the app adds later reaches an open picker.
+      appStyle(".p-9{padding:36px}");
+      await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+      expect((await listTokens(adapter)).map((item) => item.path)).toEqual(["t.p-4", "t.p-9"]);
+      setPageFrame(null);
+      await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(3));
+      expect((await listTokens(adapter)).map((item) => item.path)).toEqual(["t.palette-toolbar"]);
+    } finally {
+      watching.abort();
+      setPageFrame(null);
+    }
   });
 
   it("filters with a hook, alone or with onlyGenerated, and still resolves hidden classes", () => {
