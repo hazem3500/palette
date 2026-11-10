@@ -1209,15 +1209,11 @@ ${morphingMenuStyles}
 .account-session .secondary { width: 100%; min-height: 40px; }
 .account-setting { display: grid; gap: 8px; }
 .account-setting-label { font-size: 11px; line-height: 16px; color: #a5a5a5; text-transform: uppercase; letter-spacing: .05em; }
-.draft-share, .account-share { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; line-height: 16px; color: #a5a5a5; cursor: pointer; -webkit-user-select: none; user-select: none; }
-.account-share { min-height: 32px; font-size: 14px; color: #e6e6e6; }
-:is(.draft-share, .account-share) input,
+.account-share { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 32px; font-size: 14px; line-height: 16px; color: #e6e6e6; cursor: pointer; -webkit-user-select: none; user-select: none; }
+.account-share input,
 .account-layer .account .account-share input,
 .account-layer .account .account-share input:focus { appearance: auto; flex: none; width: 14px; height: 14px; min-width: 14px; min-height: 0; margin: 0; padding: 0; background: none; box-shadow: none; accent-color: var(--accent, #bda6ef); cursor: pointer; }
-:is(.draft-share, .account-share) input:focus-visible { outline: 2px solid var(--accent, #bda6ef); outline-offset: 2px; }
-.new-comment-composer .draft-body .draft-share { grid-row: 2; grid-column: 2; align-self: center; }
-.new-comment-composer .draft-body:has(.tag-slot) .draft-share { grid-row: 3; }
-.new-comment-composer .draft-body:not(:has(.avatar)) .draft-share { grid-column: 1; }
+.account-share input:focus-visible { outline: 2px solid var(--accent, #bda6ef); outline-offset: 2px; }
 .account .selection-menu > summary.selection-trigger {
   width: 100%;
   min-height: 44px;

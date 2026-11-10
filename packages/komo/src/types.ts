@@ -358,8 +358,9 @@ export interface CommentsOptions {
   snapshots?: PaletteSnapshots;
   /**
    * Let reviewers keep new comments out of an integration fed by the project's
-   * webhooks, e.g. { label: "Post to the GitHub PR" }. Shows an account default and
-   * a per-comment toggle; a comment kept in Palette is delivered with `share: false`.
+   * webhooks, e.g. { label: "Post to the GitHub PR" }. Adds a setting to the Account
+   * panel that every new comment follows; a comment kept in Palette is delivered
+   * with `share: false`.
    * Needs a server that advertises `share` in /config. Off by default.
    */
   share?: { label: string };

@@ -71,17 +71,11 @@ async function compose(config: CommentsOptions = options) {
   return { shadow, toggle, send };
 }
 
-it("starts each comment from the account default and posts the reviewer's choice", async () => {
+it.each([false, true])("posts the account default (%s) with no checkbox in the comment box", async (saved) => {
+  shareComments = saved;
   const { toggle, send } = await compose();
-  expect(toggle()?.checked).toBe(false);
-  expect(toggle()?.closest("label")?.textContent).toBe("Post to the GitHub PR");
-  toggle()!.click();
-  expect(await send()).toMatchObject({ share: true });
-});
-
-it("sends the account default when the comment's toggle is untouched", async () => {
-  const { send } = await compose();
-  expect(await send()).toMatchObject({ share: false });
+  expect(toggle()).toBeNull();
+  expect(await send()).toMatchObject({ share: saved });
 });
 
 it("saves the account default from the Account panel", async () => {
