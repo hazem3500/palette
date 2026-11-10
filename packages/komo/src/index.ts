@@ -504,10 +504,6 @@ export function initComments(options: CommentsOptions): CommentsController {
   // The server accepts `share` on new threads (from /config) and the host opted in.
   let shareSupported = false;
   const sharing = () => !!options.share?.label && shareSupported && !!api.token;
-  // A per-comment override of the account default, kept with the draft it was made on.
-  let draftShare: { anchor: Anchor; share: boolean } | null = null;
-  const shareDraft = (anchor: Anchor | null) =>
-    draftShare && draftShare.anchor === anchor ? draftShare.share : api.shareComments;
   // The Account panel's API tokens view keeps its node (and a shown secret) until left.
   let tokenView: import("./account-tokens.js").TokenView | undefined;
   let tokenLoad: Promise<HTMLElement> | undefined;
@@ -4927,14 +4923,6 @@ export function initComments(options: CommentsOptions): CommentsController {
             (tag) => (draftTags = draftTags.filter((item) => item !== tag)),
           ),
         );
-      if (sharing() && draft) {
-        const anchor = draft;
-        body.append(
-          shareToggle(options.share!.label, shareDraft(anchor), "draft-share", (share) => {
-            draftShare = { anchor, share };
-          }),
-        );
-      }
       form.append(body);
     }
     // A proposal can be posted on its own; the note is optional.
@@ -5044,8 +5032,8 @@ export function initComments(options: CommentsOptions): CommentsController {
       const tags = draftTags;
       const note = draftText;
       const proposal = draftProposal;
-      const share = sharing() ? shareDraft(anchor) : undefined;
-      const shareChoice = draftShare;
+      // Each comment follows the reviewer's account default.
+      const share = sharing() ? api.shareComments : undefined;
       // Persistent layout, e.g. an app sidebar, carries its comments to every page.
       const target = resolveAnchor(anchor);
       const scope = target && inPersistentRegion(target, options) ? "all" as const : undefined;
@@ -5095,7 +5083,6 @@ export function initComments(options: CommentsOptions): CommentsController {
             draftText = note;
             draftProposal = proposal;
             draftTags = tags;
-            draftShare = shareChoice;
           } else recoveredDrafts.push({ anchor, text: comment.body });
         },
       );
@@ -6935,7 +6922,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     issue = null;
     connection = "Connecting";
     google = github = guests = guestResolve = privateProject = apiTokens = shareSupported = false;
-    draft = parkedDraft = draftShare = null;
+    draft = parkedDraft = null;
     draftText = draftProposal = "";
     draftTags = [];
     replies.clear();
