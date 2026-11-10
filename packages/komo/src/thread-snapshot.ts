@@ -28,7 +28,7 @@ type Snapshotted = Pick<Thread, "anchor" | "snapshot" | "page" | "id">;
 type Pending = { image?: string; html?: string; note?: string };
 
 const css = `.palette-snapshot{display:block;width:fit-content;margin-top:8px;padding:0;border:0;border-radius:6px;background:none;color:inherit;font:inherit;cursor:zoom-in;line-height:0}
-.palette-snapshot img{display:block;width:72px;height:48px;border-radius:6px;object-fit:cover;object-position:left top;background:color-mix(in oklab,currentColor 8%,transparent);outline:1px solid color-mix(in oklab,currentColor 16%,transparent);outline-offset:-1px}
+.palette-snapshot img{display:block;width:72px;height:48px;border-radius:6px;object-fit:contain;background:color-mix(in oklab,currentColor 8%,transparent);outline:1px solid color-mix(in oklab,currentColor 16%,transparent);outline-offset:-1px}
 .palette-snapshot:not([data-ready]){background:color-mix(in oklab,currentColor 8%,transparent)}
 .palette-snapshot:not([data-ready]) img{visibility:hidden}
 .palette-snapshot[hidden]{display:none}
