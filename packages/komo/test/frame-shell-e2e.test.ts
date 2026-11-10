@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { chromium, type Browser, type Frame, type Page } from "playwright-core";
+import { chromium, type Browser, type Dialog, type Frame, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Single-copy simulated viewport (frame.shell): the top window becomes Palette's shell and the app
@@ -102,19 +102,18 @@ async function viewportFrame(page: Page): Promise<Frame> {
   });
   return page.frames().find((item) => item.name() === "komo-viewport")!;
 }
-/** Opens Frame on the normal page and accepts the reload into the shell. */
+/** Opens Frame on the normal page; with nothing unposted, it reloads into the shell without asking. */
 async function enter(page: Page, query = "") {
   await load(page, query);
   await page.waitForFunction(() => !!(window as any).palette);
-  const asked = new Promise<string>((done) => page.once("dialog", (dialog) => {
-    done(dialog.message());
-    void dialog.accept();
-  }));
+  const asked: string[] = [];
+  const listen = (dialog: Dialog) => (asked.push(dialog.message()), void dialog.accept());
+  page.on("dialog", listen);
   await page.keyboard.press("l");
-  const message = await asked;
   await page.waitForURL(/palette-shell=[0-9a-f]{32}/);
   await page.waitForFunction(() => !!(window as any).palette);
-  return { message, frame: await viewportFrame(page) };
+  page.off("dialog", listen);
+  return { asked, frame: await viewportFrame(page) };
 }
 
 describe.skipIf(!chrome)("Frame single-copy shell", () => {
@@ -135,13 +134,12 @@ describe.skipIf(!chrome)("Frame single-copy shell", () => {
     await page.close();
   });
 
-  it("reloads into a shell for the simulated viewport, after asking, and runs the app once, in the frame", async () => {
+  it("reloads into a shell for the simulated viewport, without asking when nothing is unposted, and runs the app once, in the frame", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    const { message, frame } = await enter(page);
-    expect(message).toContain("Reload in Frame?");
-    expect(message).toContain("Unsaved app changes will be lost.");
+    const { asked, frame } = await enter(page);
+    expect(asked).toEqual([]);
     const now = await state(page);
     expect(now).toMatchObject({ shell: true, mounts: ["frame"], appOnTop: false });
     const nonce = new URL(now.url).searchParams.get("palette-shell");
@@ -195,16 +193,18 @@ describe.skipIf(!chrome)("Frame single-copy shell", () => {
     await page.close();
   });
 
-  it("keeps only the current app when the reviewer cancels, without reloading", async () => {
+  it("keeps only the current app when the reload is refused, and retries from the menu", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    await load(page);
+    await load(page, "?guard");
     await page.waitForFunction(() => !!(window as any).palette);
+    // Sticky activation, so the guard's prompt shows.
+    await page.mouse.click(600, 700);
     page.once("dialog", (dialog) => void dialog.dismiss());
     await page.keyboard.press("l");
     await page.getByRole("button", { name: "Why the simulated viewport is unavailable", exact: true }).waitFor();
     expect(page.frames()).toHaveLength(1);
-    expect(await state(page)).toMatchObject({ shell: false, mounts: ["top"], flag: null });
-    expect(page.url()).toBe(`${origin}/`);
+    expect(await state(page)).toMatchObject({ shell: false, mounts: ["top"] });
+    expect(page.url()).toBe(`${origin}/?guard`);
     await page.locator(".frame-size-trigger").click();
     await page.getByRole("menuitemcheckbox", { name: "Simulate real viewport" }).click();
     page.once("dialog", dialog => void dialog.accept());
@@ -226,7 +226,6 @@ describe.skipIf(!chrome)("Frame single-copy shell", () => {
       };
     });
     await load(page);
-    page.once("dialog", dialog => void dialog.accept());
     await page.keyboard.press("l");
     await page.getByRole("button", { name: "Why the simulated viewport is unavailable", exact: true }).waitFor();
     expect(page.frames()).toHaveLength(1);
@@ -280,7 +279,6 @@ describe.skipIf(!chrome)("Frame single-copy shell", () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await load(page, "?url=/deny");
     await page.waitForFunction(() => !!(window as any).palette);
-    page.once("dialog", (dialog) => void dialog.accept());
     await page.keyboard.press("l");
     await page.waitForURL(/palette-shell=/);
     await page.waitForURL((url) => !url.searchParams.has("palette-shell"));
@@ -305,7 +303,7 @@ describe.skipIf(!chrome)("Frame single-copy shell", () => {
     await page.keyboard.press("l");
     await page.waitForFunction(() => [...document.body.children].some(node => node.shadowRoot?.textContent?.includes("Reload cancelled.")));
     expect(page.frames()).toHaveLength(1);
-    expect(kinds).toEqual(["confirm", "beforeunload"]);
+    expect(kinds).toEqual(["beforeunload"]);
     expect(await state(page)).toMatchObject({ shell: false, mounts: ["top"] });
     expect(page.url()).toBe(`${origin}/?guard`);
     await page.close();
