@@ -230,7 +230,9 @@ await writeFile(
 // 249,850 -> 250,200: strip invisible border/outline longhands from comment snapshots (#212). On-demand
 // snapshot chunk +194 gzip (4,560 -> 4,754); coreFeatures 249,849 -> 250,058 on the failed publish of that
 // merge, plus CI margin.
-if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 250_200)
+// 250,200 -> 250,900: the comment box's share checkbox and the Account panel's "New comments" default
+// run at mount with the composer and account dialog they extend; 250,767 measured in CI, plus margin.
+if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 250_900)
   throw new Error("Palette exceeds its core production consumer bundle budget.");
 // The inline-text feature adds a small button/state bridge to the optional
 // Design mode entry. Its editor remains a separate on-demand chunk below.
