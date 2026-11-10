@@ -1,5 +1,5 @@
-import { cssParts, primaryFamily } from "./css-value-parts.js";
-export { cssParts, primaryFamily } from "./css-value-parts.js";
+import { cssParts, fontParts, fontValue, primaryFamily } from "./css-value-parts.js";
+export { cssParts, fontParts, fontValue, primaryFamily, type FontParts } from "./css-value-parts.js";
 import { el } from "./dom.js";
 import type { Field } from "./design-panel.js";
 import type { DesignToken } from "./design-system.js";
@@ -45,23 +45,6 @@ export function readableColor(value: string): string {
   const hex = `#${parts.slice(1, 4).map(part => Math.round(Number(part)).toString(16).padStart(2, "0")).join("")}`;
   const alpha = parts[4] === undefined ? 1 : Number(parts[4]) / (parts[5] ? 100 : 1);
   return alpha < 1 ? `${hex} · ${Math.round(alpha * 100)}%` : hex;
-}
-
-export type FontParts = { style: string; weight: string; size: string; lineHeight: string; family: string };
-const fontPattern = /^\s*((?:(?:italic|oblique|normal|small-caps|bold|bolder|lighter|[1-9]00)\s+)*)([+-]?(?:\d*\.)?\d+[a-z%]*)(?:\s*\/\s*((?:\d*\.)?\d+[a-z%]*|normal))?(?:\s+([\s\S]+?))?\s*$/i;
-/** A `font` shorthand as style, weight, size, line height and family; a token may leave the family out. */
-export function fontParts(value: string): FontParts | undefined {
-  const match = fontPattern.exec(value);
-  if (!match) return;
-  const words = match[1].trim().split(/\s+/).filter(Boolean);
-  return {
-    style: words.filter(word => /^(italic|oblique|small-caps)$/i.test(word)).join(" "),
-    weight: words.find(word => /^(bold|bolder|lighter|[1-9]00)$/i.test(word)) ?? "",
-    size: match[2], lineHeight: match[3] ?? "", family: match[4] ?? "",
-  };
-}
-export function fontValue(font: FontParts): string {
-  return [font.style, font.weight, font.size + (font.lineHeight ? `/${font.lineHeight}` : ""), font.family].filter(Boolean).join(" ");
 }
 
 /** One step of a nudge: tenths for unitless numbers and font-relative units, else whole units. */

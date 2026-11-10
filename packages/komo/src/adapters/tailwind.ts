@@ -10,6 +10,7 @@
 import type { DesignToken, DesignTokenType, PreviewTarget, ThemeAxis, ThemeState, TokenAdapter, TokenUsage, TokenValueChange } from "../design-system.js";
 import { inlineStyleSnapshot } from "../design-preview.js";
 import { previewVariables } from "./variable-preview.js";
+import { fontParts } from "../css-value-parts.js";
 import { isDesignTarget } from "../design-target.js";
 
 /** One utility class (or a set of equivalent classes) that sets design tokens. */
@@ -202,6 +203,67 @@ function generatedClasses(strict: boolean, page: Document): Set<string> | null {
   return scan[3] || !scan[1] || (strict && scan[2]) ? null : scan[0];
 }
 
+/** The style rules for utility `name` in `page`, with its variants and `!` form: `.rounded`, `.md\:rounded`, `.\!rounded`. */
+function classRules(page: Document, name: string): CSSStyleRule[] {
+  const escaped = CSS.escape(name);
+  const names = (found: string) => found === escaped || found === `\\!${escaped}` || found === `${escaped}\\!` || found.endsWith(`\\:${escaped}`) || found.endsWith(`\\:\\!${escaped}`);
+  const found: CSSStyleRule[] = [];
+  const walk = (rules: () => CSSRuleList) => {
+    let list;
+    try { list = rules(); } catch { return; }
+    for (const rule of list as Iterable<AnyRule>) {
+      if (rule.selectorText != null && [...rule.selectorText.matchAll(classPattern)].some((match) => names(match[1]))) found.push(rule as CSSStyleRule);
+      if (rule.cssRules) walk(() => rule.cssRules!);
+      if ("styleSheet" in rule) walk(() => rule.styleSheet!.cssRules);
+    }
+  };
+  for (const sheet of documentSheets(page)) walk(() => sheet.cssRules);
+  return found;
+}
+
+/**
+ * What an edited value sets in its utility's rules. A typography value is a font
+ * shorthand, split into longhands so a family-less "700 2rem/1.4" still applies;
+ * anything else sets each property the token covers.
+ */
+function declarations(entry: Entry, value: string): Array<[property: string, value: string, add: boolean]> {
+  if (entry.token.type === "typography") {
+    const font = fontParts(value);
+    if (!font) return [];
+    // A part the original rule lacks (a family added in the editor) is added to it.
+    return ([["font-style", font.style], ["font-weight", font.weight], ["font-size", font.size], ["line-height", font.lineHeight], ["font-family", font.family]] as const)
+      .flatMap(([property, part]) => (part ? [[property, part, true] as [string, string, boolean]] : []));
+  }
+  return [...entry.covers].map((property) => [property, value, false]);
+}
+
+/**
+ * Preview tokens without a CSS variable by rewriting their utility's rules in
+ * place, so the page's cascade order is untouched; the cleanup puts every
+ * declaration back. A themed change applies only while `theme` is its key.
+ */
+function previewRules(changes: readonly TokenValueChange[], entryOf: (path: string) => Entry | undefined, theme: string | undefined, page: Document): () => void {
+  const restore: Array<() => void> = [];
+  for (const change of changes) {
+    const entry = entryOf(change.path);
+    if (!entry || entry.token.cssVariable || /[{};<]/.test(change.value)) continue;
+    if (change.theme && change.theme !== theme) continue;
+    const set = declarations(entry, change.value);
+    if (!set.length) continue;
+    for (const rule of classRules(page, entry.classes[0]))
+      for (const [declared, value, add] of set) {
+        // Tailwind composes shadows from --tw-shadow, so a shadow edit sets that.
+        const property = declared === "box-shadow" && rule.style.getPropertyValue("--tw-shadow") ? "--tw-shadow" : declared;
+        const before = rule.style.getPropertyValue(property);
+        if (!before && !add) continue;
+        const priority = rule.style.getPropertyPriority(property);
+        rule.style.setProperty(property, value, priority);
+        restore.push(() => (before ? rule.style.setProperty(property, before, priority) : rule.style.removeProperty(property)));
+      }
+  }
+  return () => { for (const undo of restore.reverse()) undo(); };
+}
+
 /** Pick the theme-specific value: the most specific fully-matching key, else `value`. */
 export function tokenValue(token: Pick<TailwindToken, "value" | "values">, theme: ThemeState = {}): string {
   let best: string | undefined;
@@ -307,12 +369,13 @@ export function tailwindTokens(table: TailwindTable, options: TailwindTokensOpti
         ...(token.toCss ? { toCss: token.toCss } : {}),
       }));
     },
-    // Only tables that name their variables can preview token values.
-    ...(table.tokens.some((token) => token.cssVariable) ? {
-      previewValues(changes: TokenValueChange[], theme?: string, target?: PreviewTarget) {
-        return previewVariables(changes, (path) => byPath.get(path)?.token, options.scopes, theme, target?.document);
-      },
-    } : {}),
+    // A token with a CSS variable previews by setting it; the rest by rewriting their utility's rules.
+    previewValues(changes: TokenValueChange[], theme?: string, target?: PreviewTarget) {
+      const page = target?.document ?? document;
+      const variables = previewVariables(changes, (path) => byPath.get(path)?.token, options.scopes, theme, page);
+      const rules = previewRules(changes, (path) => byPath.get(path), theme, page);
+      return () => { rules(); variables(); };
+    },
     // Only `onlyGenerated` lists depend on the page, so only they report changes.
     ...(options.onlyGenerated ? { subscribe: watchSheets } : {}),
     resolve(element) {

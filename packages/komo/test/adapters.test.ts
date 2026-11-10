@@ -169,8 +169,33 @@ describe("tailwindTokens", () => {
     undo();
   });
 
+  it("previews tokens without a CSS variable by rewriting their utility's rules in place", () => {
+    const style = document.createElement("style");
+    style.textContent = ".rounded{border-radius:8px}@media (min-width:1px){.md\\:rounded{border-radius:8px}}.text-h1{font-size:2.8125rem;line-height:1.42;font-weight:700}.shadow-a{--tw-shadow:0 1px 2px red;box-shadow:var(--tw-shadow)}";
+    document.head.append(style);
+    const adapter = tailwindTokens({ tokens: [
+      { path: "radius.default", type: "dimension", class: "rounded", properties: ["border-radius"], value: "8px" },
+      { path: "typography.h1", type: "typography", class: "text-h1", properties: ["font-size", "line-height", "font-weight"], value: "700 2.8125rem/1.42" },
+      { path: "elevation.a", type: "shadow", class: "shadow-a", properties: ["box-shadow"], values: { light: "0 1px 2px red", dark: "0 1px 2px blue" } },
+    ] });
+    const css = () => [...style.sheet!.cssRules].map((rule) => rule.cssText).join(" ");
+    const original = css();
+    const cleanup = adapter.previewValues!([
+      { path: "radius.default", value: "2px" },
+      { path: "typography.h1", value: "900 3rem/1.5 serif" },
+      { path: "elevation.a", value: "0 0 4px green", theme: "dark" },
+    ], "light");
+    expect(css()).toContain(".rounded { border-radius: 2px; }");
+    expect(css()).toContain(".md\\:rounded { border-radius: 2px; }");
+    expect(css()).toMatch(/\.text-h1 \{ font-size: 3rem; line-height: 1\.5; font-weight: 900; font-family: serif; \}/);
+    // A dark edit leaves the light page alone.
+    expect(css()).toContain("--tw-shadow: 0 1px 2px red");
+    cleanup();
+    expect(css()).toBe(original);
+    style.remove();
+  });
+
   it("maps tokens to their CSS variable to preview Tokens view values", () => {
-    expect(tailwindTokens(table).previewValues).toBeUndefined();
     const channels = (value: string) => value.replace("#", "").match(/../g)!.map((pair) => parseInt(pair, 16)).join(" ");
     const adapter = tailwindTokens({ tokens: [
       { path: "color.bg.surface", type: "color", class: "bg-surface", properties: ["background-color"], values: { light: "#131213", dark: "#e6e6e6" }, cssVariable: "--color-surface", toCss: channels },

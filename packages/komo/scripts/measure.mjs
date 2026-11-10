@@ -371,7 +371,10 @@ if (report.optionalTypedEditor.gzip > 5_875)
 // 3,450: onlyGenerated reports stylesheet changes through subscribe() (a MutationObserver
 // and <link> load/error listeners, only while Palette is subscribed) and skips unreadable
 // sheets one by one, with a strict mode (+372 bytes); measured 3,353, plus ~3%.
-if (report.adapterTailwind.gzip > 3_450)
+// 4,100: Tokens view previews for tokens without a CSS variable rewrite their utility's rules in
+// place (variants and !important included, per theme, restored on cleanup) and split font
+// shorthands into longhands (+631 bytes); measured 3,984, plus ~3%.
+if (report.adapterTailwind.gzip > 4_100)
   throw new Error("Palette's Tailwind token adapter exceeds its gzip budget.");
 if (report.adapterCssVariables.gzip > 2_650)
   throw new Error("Palette's CSS variable token adapter exceeds its gzip budget.");
