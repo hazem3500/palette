@@ -128,6 +128,8 @@ export class CommentsApi {
   token: string | null = null;
   user: Identity | null = null;
   transient = false;
+  /** The reviewer's default for posting new comments to the project's integrations. */
+  shareComments = true;
   private revision: number | undefined;
   private cachedThreads: Thread[] = [];
   private reads = new AbortController();
@@ -424,6 +426,7 @@ export class CommentsApi {
       this.revision = undefined;
       this.cachedThreads = [];
     }
+    if (data.token !== this.token || data.user.id !== this.user?.id) this.shareComments = true;
     this.token = data.token;
     this.user = data.user;
     this.rememberUser();
@@ -466,6 +469,7 @@ export class CommentsApi {
     this.cachedThreads = [];
     this.token = null;
     this.user = null;
+    this.shareComments = true;
     this.transient = false;
     this.rememberUser();
     // An empty shared cookie prevents another preview's local fallback reviving logout.
@@ -479,10 +483,11 @@ export class CommentsApi {
   async restore() {
     if (!this.token) return;
     const token = this.token;
-    const result = await this.request<{ user: Identity }>("me");
+    const result = await this.request<{ user: Identity; settings?: { shareComments?: unknown } }>("me");
     if (this.token !== token) return;
     if (!identity(result.user)) throw invalidResponse();
     this.save({ token, user: result.user });
+    this.shareComments = result.settings?.shareComments !== false;
   }
   async guest(name: string) {
     this.save(await this.request("auth/guest", "POST", { name }));

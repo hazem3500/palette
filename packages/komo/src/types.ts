@@ -356,6 +356,13 @@ export interface CommentsOptions {
    * never captured, nor is anything inside an element with data-palette-no-snapshot (or the older data-komo-no-snapshot).
    */
   snapshots?: PaletteSnapshots;
+  /**
+   * Let reviewers keep new comments out of an integration fed by the project's
+   * webhooks, e.g. { label: "Post to the GitHub PR" }. Shows an account default and
+   * a per-comment toggle; a comment kept in Palette is delivered with `share: false`.
+   * Needs a server that advertises `share` in /config. Off by default.
+   */
+  share?: { label: string };
 }
 
 export interface CommentsController {

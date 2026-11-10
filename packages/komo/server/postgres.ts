@@ -96,6 +96,7 @@ export function postgresDatabase(connectionString: string, pg: Pg) {
           "006_thread_scope.sql",
           "007_session_origin.sql",
           "008_webhook_outbox.sql",
+          "009_user_share_comments.sql",
         ];
         if (
           versions.rows.length > 1 ||

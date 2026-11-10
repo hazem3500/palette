@@ -109,6 +109,8 @@ beforeAll(async () => {
     other: { repo: "owner/site", origins: [origin] },
     photos: { repo: "owner/site", origins: [origin] },
     scopes: { repo: "owner/site", origins: [origin] },
+    // Its own project keeps the sharing test out of the "test" rate limits.
+    sharing: { repo: "owner/site", origins: [origin] },
     strict: { repo: "owner/site", origins: [origin], allowGuestResolve: false },
     demo: { repo: "owner/site", origins: [origin], retainedCommentsPerUser: 3 },
     snapshots: {
@@ -1199,6 +1201,57 @@ describe("profile editing", () => {
       (await (await request("me", "GET", undefined, first.token)).json()).user
         .avatarUrl
     ).toBeUndefined();
+  });
+});
+
+describe("sharing default", () => {
+  it("keeps each reviewer's default and accepts a per-comment choice", async () => {
+    const call = (path: string, method = "GET", data?: unknown, token?: string) =>
+      request(path, method, data, token, "feature/a", "owner/site", "sharing");
+    const first = (await (
+      await call("auth/guest", "POST", { name: "Keeps comments" })
+    ).json()) as { token: string };
+    const second = (await (
+      await call("auth/guest", "POST", { name: "Shares comments" })
+    ).json()) as { token: string };
+    const settings = async (token: string) =>
+      (await (await call("me", "GET", undefined, token)).json()).settings;
+    expect(await settings(first.token)).toEqual({ shareComments: true });
+    expect(
+      (await call("me/settings", "PATCH", { shareComments: 0 }, first.token))
+        .status
+    ).toBe(400);
+    expect(
+      (await call("me/settings", "PATCH", { shareComments: false })).status
+    ).toBe(401);
+    expect(
+      (
+        await call("me/settings", "PATCH", { shareComments: false }, first.token)
+      ).status
+    ).toBe(200);
+    expect(await settings(first.token)).toEqual({ shareComments: false });
+    expect(await settings(second.token)).toEqual({ shareComments: true });
+    expect(
+      (
+        await call(
+          "threads",
+          "POST",
+          { page: "/share", anchor, body: "Kept", share: false },
+          first.token
+        )
+      ).status
+    ).toBe(201);
+    expect(
+      (
+        await call(
+          "threads",
+          "POST",
+          { page: "/share", anchor, body: "Bad", share: "no" },
+          first.token
+        )
+      ).status
+    ).toBe(400);
+    expect((await (await call("config")).json()).share).toBe(true);
   });
 });
 

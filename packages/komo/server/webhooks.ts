@@ -20,6 +20,8 @@ export type WebhookEvent = {
   author: string;
   body: string | null;
   snapshotStatus?: "pending" | "skipped";
+  /** Present and false when the reviewer chose to keep this comment in Palette. */
+  share?: false;
 };
 
 export type WebhookEnv = {

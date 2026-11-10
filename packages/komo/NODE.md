@@ -242,6 +242,18 @@ Omitting intent leaves status unknown and preserves the existing event fields,
 so older clients can still upload later without claiming an intentional skip.
 Legacy intent is never inferred from an image 404. There is no new snapshot event.
 
+### Keeping comments out of integrations
+
+`config.share: true` advertises this. `POST /threads` accepts optional boolean
+`share`; with `false`, its `comment.created` event gains `share: false` and is
+still delivered, so the receiver decides what to skip. Events from clients that
+omit it are unchanged. A reviewer's default is returned by `GET /me` as
+`settings.shareComments` and saved with `PATCH /me/settings`
+`{"shareComments": boolean}`. It needs D1 migration `0023_user_share_comments` or
+PostgreSQL migration `009_user_share_comments` (automatic at Node startup), which
+adds one nullable column to `users`. Before the migration, `GET /me` reports
+`true` and saving the default fails with a configuration error.
+
 Authenticated `GET /threads/:id/snapshot` returns `{status,kinds}`. `status` is
 `pending`, `ready`, `skipped`, `failed`, or `unknown` (legacy/imported threads).
 `kinds` lists stored `image`/`html` captures. Any successfully stored kind means
