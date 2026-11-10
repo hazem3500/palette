@@ -119,6 +119,17 @@ import type { SnapshotContext } from "./thread-snapshot.js";
 const pinSizes: readonly PinSize[] = ["full", "compact", "dot", "auto"];
 const pinSizeNames: Record<PinSize, string> = { full: "Full", compact: "Compact", dot: "Dot", auto: "Auto" };
 
+/** The mounted controller, published on its window for the framed app's host calls. */
+const CONTROLLER_KEY = Symbol.for("palette.controller");
+type ControllerSlot = Record<symbol, CommentsController | undefined>;
+const outerController = () => {
+  try {
+    return (window.parent as unknown as ControllerSlot)[CONTROLLER_KEY];
+  } catch {
+    return undefined;
+  }
+};
+
 const instances = new WeakMap<
   Document,
   { scope: string; controller: CommentsController }
@@ -142,7 +153,15 @@ export function initComments(options: CommentsOptions): CommentsController {
     comment() {},
     async refresh() {},
   };
-  if (typeof document === "undefined" || options.enabled === false || framedByPalette()) return noop;
+  if (typeof document === "undefined" || options.enabled === false) return noop;
+  // Inside Frame's viewport iframe the toolbar belongs to Palette in the parent
+  // window, so a host gesture there reaches that instance.
+  if (framedByPalette())
+    return {
+      ...noop,
+      open: () => outerController()?.open(),
+      restore: () => outerController()?.restore(),
+    };
   if (!options.endpoint) {
     console.error(
       "Palette: set `endpoint` to your Palette server (see the self-hosting guide).",
@@ -7099,6 +7118,8 @@ export function initComments(options: CommentsOptions): CommentsController {
       toolbarRoot.unmount();
       host.remove();
       instances.delete(document);
+      const slot = window as unknown as ControllerSlot;
+      if (slot[CONTROLLER_KEY] === controller) delete slot[CONTROLLER_KEY];
     },
     comment(element) {
       const compose = () => {
@@ -7136,6 +7157,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     },
   };
   instances.set(document, { scope, controller });
+  (window as unknown as ControllerSlot)[CONTROLLER_KEY] = controller;
   restoring = !!shell || (!options.onboarding && openStore.get());
   scalePage();
   const cached = options.onboarding ? null : api.cached();

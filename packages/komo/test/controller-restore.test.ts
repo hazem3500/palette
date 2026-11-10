@@ -35,3 +35,12 @@ it("restore() brings back a dismissed toolbar without opening the sidebar", () =
   expect(sessionStorage.getItem(dismissKey)).toBeNull();
   expect(sessionStorage.getItem("palette:open:fixture:fixture")).toBeNull();
 });
+
+it("publishes the controller for a framed app until it is destroyed", () => {
+  const slot = window as unknown as Record<symbol, CommentsController | undefined>;
+  const key = Symbol.for("palette.controller");
+  controller = initComments(options);
+  expect(slot[key]).toBe(controller);
+  controller.destroy();
+  expect(slot[key]).toBeUndefined();
+});
