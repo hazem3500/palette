@@ -25,7 +25,7 @@ beforeAll(async () => {
       document.documentElement.setAttribute('data-mode',new URLSearchParams(location.search).get('theme')??'light');
       const tokens=tailwindTokens({tokens:[
         {path:'typography.p2',type:'typography',class:'text-p2',properties:['font'],value:'500 0.875rem/1.43',label:'p2'},
-        {path:'typography.h5',type:'typography',class:'text-h5',properties:['font'],value:'600 1.125rem/1.33',label:'h5'},
+        {path:'typography.h5',type:'typography',class:'text-h5',properties:['font-size','line-height','font-weight'],value:'600 1.125rem/1.33',label:'h5'},
         {path:'shadow.raised',type:'shadow',class:'shadow-raised',properties:['box-shadow'],value:'0 1px 3px 0 rgb(0 0 0 / 8%)',label:'raised'},
         {path:'radius.card',type:'dimension',class:'radius-card',properties:['border-radius'],value:'8px',label:'card'},
         {path:'color.ink',type:'color',class:'text-ink',properties:['color'],value:'#131213',label:'ink'},
@@ -40,7 +40,7 @@ beforeAll(async () => {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
     if (path === "/") {
       response.setHeader("content-type", "text/html");
-      response.end(`<style>body{margin:0;font:14px system-ui;background:#fafafa}[data-mode=dark] body{background:#141414;color:#eee}main{min-height:100vh;box-sizing:border-box;padding:60px}.text-p2{font:500 0.875rem/1.43 system-ui}.text-h5{font:600 1.125rem/1.33 system-ui}.shadow-raised{box-shadow:0 1px 3px 0 rgb(0 0 0 / 8%)}.radius-card{border-radius:8px}.text-ink{color:#131213}</style><main><p class="text-p2 text-ink">Example body</p><h5 class="text-h5">Heading</h5><div class="shadow-raised radius-card" style="width:120px;height:60px;background:#fff"></div></main><script type="module" src="/entry.js"></script>`);
+      response.end(`<style>body{margin:0;font:14px system-ui;background:#fafafa}[data-mode=dark] body{background:#141414;color:#eee}main{min-height:100vh;box-sizing:border-box;padding:60px}.text-p2{font:500 0.875rem/1.43 system-ui}.text-h5{font-size:1.125rem;line-height:1.33;font-weight:600}.shadow-raised{box-shadow:0 1px 3px 0 rgb(0 0 0 / 8%)}.radius-card{border-radius:8px}.text-ink{color:#131213}</style><main><p class="text-p2 text-ink">Example body</p><h5 class="text-h5">Heading</h5><div class="shadow-raised radius-card" style="width:120px;height:60px;background:#fff"></div></main><script type="module" src="/entry.js"></script>`);
       return;
     }
     try {
@@ -121,6 +121,33 @@ describe.skipIf(!chrome).each(["Fit", "100%"])("Tokens view Custom editors at Fr
     await tab.keyboard.press("Escape");
     await expect.poll(() => tab.locator(".palette-tokens").count()).toBe(0);
     expect(await row(tab, "p2").locator("i").textContent()).toBe("700 0.975rem/1.43");
+    expect(errors).toEqual([]);
+    await tab.close();
+  });
+
+  it("previews a typography token listed by its longhands and a radius token with no CSS variable on the page", async () => {
+    const { tab, errors } = await tokensView(zoom);
+    // The page may be framed: read the element wherever it renders.
+    const computed = async (selector: string, property: string) => {
+      for (const frame of tab.frames()) {
+        const value = await frame.evaluate(([selector, property]) => {
+          const node = document.querySelector(`main ${selector}`);
+          return node ? getComputedStyle(node).getPropertyValue(property) : null;
+        }, [selector, property]).catch(() => null);
+        if (value != null) return value;
+      }
+      return null;
+    };
+    let popup = await open(tab, "h5");
+    expect(await popup.getByText("Custom expression", { exact: false }).count()).toBe(0);
+    await popup.getByRole("combobox", { name: "Font weight", exact: true }).selectOption("900");
+    await close(tab, "h5");
+    await expect.poll(() => computed("h5", "font-weight")).toBe("900");
+    popup = await open(tab, "card");
+    await popup.getByRole("textbox", { name: "border-radius", exact: true }).fill("20");
+    await popup.getByRole("textbox", { name: "border-radius", exact: true }).press("Enter");
+    await close(tab, "card");
+    await expect.poll(() => computed("div.radius-card", "border-top-left-radius")).toBe("20px");
     expect(errors).toEqual([]);
     await tab.close();
   });

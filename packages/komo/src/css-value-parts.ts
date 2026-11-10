@@ -40,3 +40,20 @@ export function fontView(authored: string, computed: string, variable: (name: st
   if (missing) return { label: `${missing} unresolved`, note: "", title: `${authored} does not resolve; the text renders with ${computed}` };
   return { label: primaryFamily(computed), note: generic.test(first) ? "generic" : "", title };
 }
+
+export type FontParts = { style: string; weight: string; size: string; lineHeight: string; family: string };
+const fontPattern = /^\s*((?:(?:italic|oblique|normal|small-caps|bold|bolder|lighter|[1-9]00)\s+)*)([+-]?(?:\d*\.)?\d+[a-z%]*)(?:\s*\/\s*((?:\d*\.)?\d+[a-z%]*|normal))?(?:\s+([\s\S]+?))?\s*$/i;
+/** A `font` shorthand as style, weight, size, line height and family; a token may leave the family out. */
+export function fontParts(value: string): FontParts | undefined {
+  const match = fontPattern.exec(value);
+  if (!match) return;
+  const words = match[1].trim().split(/\s+/).filter(Boolean);
+  return {
+    style: words.filter(word => /^(italic|oblique|small-caps)$/i.test(word)).join(" "),
+    weight: words.find(word => /^(bold|bolder|lighter|[1-9]00)$/i.test(word)) ?? "",
+    size: match[2], lineHeight: match[3] ?? "", family: match[4] ?? "",
+  };
+}
+export function fontValue(font: FontParts): string {
+  return [font.style, font.weight, font.size + (font.lineHeight ? `/${font.lineHeight}` : ""), font.family].filter(Boolean).join(" ");
+}
