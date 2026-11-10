@@ -202,8 +202,10 @@ async function body(request: Request): Promise<Record<string, unknown>> {
                       ? ["emoji", "active"]
                       : path === "/me"
                         ? ["name", "avatarUrl", "accentColor"]
+                        : path === "/me/settings"
+                          ? ["shareComments"]
                         : path === "/threads"
-                          ? ["body", "page", "anchor", "tags", "scope", "snapshotIntent"]
+                          ? ["body", "page", "anchor", "tags", "scope", "snapshotIntent", "share"]
                           : path.endsWith("/comments")
                             ? ["body"]
                             : path.includes("/comments/")
@@ -241,6 +243,22 @@ async function limit(env: Env, key: string, max: number, seconds = 60) {
 }
 /** How a session was signed in, stored from D1 migration 0021 / PostgreSQL 007. */
 type SessionVia = "proxy" | "google" | "github" | "guest";
+/** Before migration 0023 (Postgres 009) every reviewer shares new comments. */
+async function shareComments(env: Env, userId: string) {
+  try {
+    const row = await env.DB.prepare("SELECT share_comments FROM users WHERE id=?")
+      .bind(userId)
+      .first<{ share_comments: number | null }>();
+    return row?.share_comments !== 0;
+  } catch (error) {
+    if (missingShareColumn(error)) return true;
+    throw error;
+  }
+}
+const missingShareColumn = (error: unknown) =>
+  error instanceof Error &&
+  /no such column|has no column named|column .* does not exist/i.test(error.message) &&
+  /share_comments/.test(error.message);
 const missingSessionColumns = (error: unknown) =>
   error instanceof Error &&
   /no such column|has no column named|column .* does not exist/i.test(error.message) &&
@@ -1151,6 +1169,8 @@ async function route(
       guestResolve: config.allowGuestResolve !== false,
       tokens: !auth.proxy || auth.proxyAccessTokens,
       // Element snapshots are opt-in on the client; guests need project consent.
+      // Clients may send `share` on new threads and edit `/me/settings`.
+      share: true,
       snapshots: {
         readiness: true,
         guests: auth.allowGuests && config.allowGuestSnapshots === true,
@@ -1343,7 +1363,25 @@ async function route(
       });
     }
     check(request.method === "GET", 405, "Method not allowed.");
-    return json({ user });
+    return json({ user, settings: { shareComments: await shareComments(env, user.id) } });
+  }
+  if (url.pathname === "/me/settings") {
+    check(request.method === "PATCH", 405, "Method not allowed.");
+    const user = await authenticate(request, env, project);
+    const data = await body(request);
+    check(typeof data.shareComments === "boolean", 400, "Invalid sharing setting.");
+    try {
+      await env.DB.prepare("UPDATE users SET share_comments=? WHERE id=?")
+        .bind(data.shareComments ? 1 : 0, user.id)
+        .run();
+    } catch (error) {
+      if (missingShareColumn(error))
+        throw new ConfigError(
+          "Saving the sharing setting needs D1 migration 0023_user_share_comments (Postgres 009). Apply the migrations."
+        );
+      throw error;
+    }
+    return json({ settings: { shareComments: data.shareComments } });
   }
   const access: PatAccess = request.method === "GET" ? "read" : "write";
   // No anonymous reads. Behind a proxy, authenticate() accepts only sessions
@@ -1543,6 +1581,7 @@ async function route(
     const firstCommentId = crypto.randomUUID();
     check(data.snapshotIntent === undefined || typeof data.snapshotIntent === "boolean", 400, "Invalid snapshot intent.");
     const snapshotStatus = data.snapshotIntent === undefined ? null : data.snapshotIntent ? "pending" : "skipped";
+    check(data.share === undefined || typeof data.share === "boolean", 400, "Invalid sharing choice.");
     await env.DB.batch([
       // Page-only threads rely on the column default, as before the scope column existed.
       scope === "all"
@@ -1567,7 +1606,7 @@ async function route(
           user.name,
           text,
           origin || url.origin
-        ), ...(snapshotStatus ? { snapshotStatus } : {}) }, firstCommentId),
+        ), ...(snapshotStatus ? { snapshotStatus } : {}), ...(data.share === false ? { share: false } : {}) }, firstCommentId),
       ...retainReviewerComments(
         env.DB,
         project,

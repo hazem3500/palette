@@ -449,6 +449,42 @@ run(
 );
 
 run(
+  "Node PostgreSQL saves a reviewer's sharing default",
+  async () => {
+    const call = async (path: string, method = "GET", body?: unknown, token?: string) => {
+      const response = await worker.fetch(
+        new Request(
+          `http://localhost:8080${path}?project=review&repo=team%2Fsite&branch=pr-share`,
+          {
+            method,
+            headers: {
+              Origin: "http://localhost:3000",
+              ...(body ? { "Content-Type": "application/json" } : {}),
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: body ? JSON.stringify(body) : undefined,
+          },
+        ) as unknown as Parameters<typeof worker.fetch>[0],
+        env,
+        { waitUntil: () => {} } as unknown as ExecutionContext,
+      );
+      return { status: response.status, data: (await response.json()) as Record<string, any> };
+    };
+    const reviewer = await call("/auth/guest", "POST", { name: "Share reviewer" });
+    const token = reviewer.data.token;
+    expect((await call("/me", "GET", undefined, token)).data.settings).toEqual({ shareComments: true });
+    expect((await call("/me/settings", "PATCH", { shareComments: "no" }, token)).status).toBe(400);
+    expect((await call("/me/settings", "PATCH", { shareComments: false })).status).toBe(401);
+    expect(await call("/me/settings", "PATCH", { shareComments: false }, token)).toEqual({
+      status: 200,
+      data: { settings: { shareComments: false } },
+    });
+    expect((await call("/me", "GET", undefined, token)).data.settings).toEqual({ shareComments: false });
+    expect((await call("/config")).data.share).toBe(true);
+  },
+);
+
+run(
   "PostgreSQL outbox rolls back with mutations and leases concurrent drainers",
   async () => {
     const { enqueueWebhook, drainWebhooks, encryptWebhookSecret } =
@@ -582,5 +618,26 @@ run(
       snapshotStatus: "pending",
       body: "Queued before capture",
     });
+    expect(JSON.parse(queued!.body)).not.toHaveProperty("share");
+    const kept = await call(
+      "/threads",
+      {
+        page: "/preview",
+        body: "Kept in Palette",
+        share: false,
+        anchor: { x: 0, y: 0, width: 0, height: 0, pageX: 0, pageY: 0, viewportWidth: 1200, selector: "h1", text: "Title" },
+      },
+      guest.token,
+    );
+    expect(kept.status).toBe(201);
+    const keptId = ((await kept.json()) as { id: string }).id;
+    const keptEvent = await db
+      .prepare("SELECT body FROM webhook_outbox WHERE body LIKE ?")
+      .bind(`%${keptId}%`)
+      .first<{ body: string }>();
+    expect(JSON.parse(keptEvent!.body)).toMatchObject({ threadId: keptId, share: false });
+    expect(
+      (await call("/threads", { page: "/preview", body: "Bad", share: "no", anchor: { x: 0, y: 0, width: 0, height: 0, pageX: 0, pageY: 0, viewportWidth: 1200, selector: "h1", text: "Title" } }, guest.token)).status,
+    ).toBe(400);
   },
 );

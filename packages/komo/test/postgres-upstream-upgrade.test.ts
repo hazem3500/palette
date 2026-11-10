@@ -282,7 +282,7 @@ run("the fork's boot migration upgrades it in place without changing a row", asy
   // As server/node.ts does at boot.
   db = postgresDatabase(url, await loadPostgres());
   await db.migrate();
-  expect((await raw.query("SELECT version FROM komo_schema")).rows).toEqual([{ version: 8 }]);
+  expect((await raw.query("SELECT version FROM komo_schema")).rows).toEqual([{ version: 9 }]);
 
   const after = await dump(raw, upstreamColumns);
   for (const table of UPSTREAM_TABLES.filter((table) => table !== "komo_schema"))

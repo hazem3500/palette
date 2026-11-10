@@ -635,6 +635,7 @@ Pass these to `initPalette(config)` from `@hazem3500/palette` or `usePalette(con
 | `sessionEndpoint` | `string` | `endpoint` | Canonical API identity for trusted gateways to the same service; never share across independent APIs. |
 | `avatar` | `(user: { id, name }) => string \| undefined` | None | Photo URL for signed-in reviewers the server has none for, such as IAP sign-in. HTTPS only; guests keep their initial. |
 | `snapshots` | `{ image?, html?, maxBytes?, redact?(element) }` | Off | Save an image and/or trimmed HTML of the commented element with each new thread. See [Comment snapshots](#comment-snapshots). |
+| `share` | `{ label }` | Off | Let reviewers keep new comments out of a webhook integration, e.g. `{ label: "Post to the GitHub PR" }`. Adds an account default and a checkbox in the comment box; a kept comment's `comment.created` event carries `share: false`. Needs a server with `config.share` ([NODE.md](NODE.md#keeping-comments-out-of-integrations)). |
 
 Google sign-in uses the account photo (`picture`) automatically, loaded from `lh3.googleusercontent.com`. Under a restrictive CSP, allow that host (or your `avatar` host) in `img-src`; blocked or failed photos fall back to the initial.
 

@@ -501,6 +501,13 @@ export function initComments(options: CommentsOptions): CommentsController {
     apiTokens = false;
   // The server's snapshot support from /config; older servers have none.
   let snapshotLimits: import("./snapshot.js").SnapshotLimits | undefined;
+  // The server accepts `share` on new threads (from /config) and the host opted in.
+  let shareSupported = false;
+  const sharing = () => !!options.share?.label && shareSupported && !!api.token;
+  // A per-comment override of the account default, kept with the draft it was made on.
+  let draftShare: { anchor: Anchor; share: boolean } | null = null;
+  const shareDraft = (anchor: Anchor | null) =>
+    draftShare && draftShare.anchor === anchor ? draftShare.share : api.shareComments;
   // The Account panel's API tokens view keeps its node (and a shown secret) until left.
   let tokenView: import("./account-tokens.js").TokenView | undefined;
   let tokenLoad: Promise<HTMLElement> | undefined;
@@ -1386,6 +1393,36 @@ export function initComments(options: CommentsOptions): CommentsController {
       sidebarMode,
       setSidebarMode,
     );
+  }
+  /** A labelled checkbox, used by the account default and the comment box. */
+  function shareToggle(label: string, checked: boolean, className: string, onChange: (share: boolean) => void) {
+    const field = el("label", className);
+    const input = el("input");
+    input.type = "checkbox";
+    input.checked = checked;
+    input.dataset.focusKey = className;
+    input.addEventListener("change", () => onChange(input.checked));
+    field.append(input, el("span", "", label));
+    return field;
+  }
+  function shareSetting() {
+    const setting = el("div", "account-setting");
+    setting.append(
+      el("span", "account-setting-label", "New comments"),
+      shareToggle(options.share!.label, api.shareComments, "account-share", (share) => {
+        const client = api;
+        const previous = client.shareComments;
+        client.shareComments = share;
+        client.request("me/settings", "PATCH", { shareComments: share }).catch((reason: unknown) => {
+          if (api !== client || client.shareComments !== share) return;
+          client.shareComments = previous;
+          notify(`Couldn't save the sharing setting. ${reason instanceof Error ? reason.message : "Try again."}`);
+          render();
+        });
+      }),
+      el("p", "muted", "The default for each new comment. You can change it in the comment box."),
+    );
+    return setting;
   }
   function channelSetting() {
     const setting = selectSetting(
@@ -4890,6 +4927,14 @@ export function initComments(options: CommentsOptions): CommentsController {
             (tag) => (draftTags = draftTags.filter((item) => item !== tag)),
           ),
         );
+      if (sharing() && draft) {
+        const anchor = draft;
+        body.append(
+          shareToggle(options.share!.label, shareDraft(anchor), "draft-share", (share) => {
+            draftShare = { anchor, share };
+          }),
+        );
+      }
       form.append(body);
     }
     // A proposal can be posted on its own; the note is optional.
@@ -4999,6 +5044,8 @@ export function initComments(options: CommentsOptions): CommentsController {
       const tags = draftTags;
       const note = draftText;
       const proposal = draftProposal;
+      const share = sharing() ? shareDraft(anchor) : undefined;
+      const shareChoice = draftShare;
       // Persistent layout, e.g. an app sidebar, carries its comments to every page.
       const target = resolveAnchor(anchor);
       const scope = target && inPersistentRegion(target, options) ? "all" as const : undefined;
@@ -5026,7 +5073,7 @@ export function initComments(options: CommentsOptions): CommentsController {
           const result = await api.request<{ id: string; commentId?: string }>(
             "threads",
             "POST",
-            { page: item.page, anchor, snapshotIntent: snapshotLimits?.readiness ? !!capture : undefined, body: comment.body, ...(tags.length ? { tags } : {}), ...(scope && { scope }) },
+            { page: item.page, anchor, snapshotIntent: snapshotLimits?.readiness ? !!capture : undefined, body: comment.body, ...(tags.length ? { tags } : {}), ...(scope && { scope }), ...(share === undefined ? {} : { share }) },
           );
           // Snapshots follow the saved thread and never hold up or fail the post.
           if (capture)
@@ -5048,6 +5095,7 @@ export function initComments(options: CommentsOptions): CommentsController {
             draftText = note;
             draftProposal = proposal;
             draftTags = tags;
+            draftShare = shareChoice;
           } else recoveredDrafts.push({ anchor, text: comment.body });
         },
       );
@@ -5442,6 +5490,7 @@ export function initComments(options: CommentsOptions): CommentsController {
         } else {
           content.append(sidebarSetting());
           if (localSite) content.append(channelSetting());
+          if (sharing()) content.append(shareSetting());
           content.append(usagePanel());
         }
         if (
@@ -6885,8 +6934,8 @@ export function initComments(options: CommentsOptions): CommentsController {
     projectLoaded = false;
     issue = null;
     connection = "Connecting";
-    google = github = guests = guestResolve = privateProject = apiTokens = false;
-    draft = parkedDraft = null;
+    google = github = guests = guestResolve = privateProject = apiTokens = shareSupported = false;
+    draft = parkedDraft = draftShare = null;
     draftText = draftProposal = "";
     draftTags = [];
     replies.clear();
@@ -7148,6 +7197,7 @@ export function initComments(options: CommentsOptions): CommentsController {
       guestResolve: boolean;
       private?: boolean;
       tokens?: boolean;
+      share?: boolean;
       snapshots?: import("./snapshot.js").SnapshotLimits;
     };
     // Settle a stored session before starting reads: an expired token clears
@@ -7189,6 +7239,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     privateProject = !!config.private;
     apiTokens = config.tokens === true;
     snapshotLimits = config.snapshots;
+    shareSupported = config.share === true;
     // The list may already have failed with an expected anonymous 401.
     // Publish auth options before awaiting it so an open account can sign in.
     render();
