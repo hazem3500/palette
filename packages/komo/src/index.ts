@@ -1985,6 +1985,8 @@ export function initComments(options: CommentsOptions): CommentsController {
         renderList();
         renderToolbar();
       }
+      // A linked comment may only be readable after a sign-in.
+      if (changed) void openDeepLink();
       return changed;
     } catch (reason) {
       if (
@@ -7328,7 +7330,12 @@ export function initComments(options: CommentsOptions): CommentsController {
     render();
     if (config.silentSignIn === true && !client.token && !options.onboarding)
       void silentSignIn().catch(() => {});
-    const changed = await listed;
+    // The list already shows why it is empty, so a signed-out 401 needs no
+    // notice, which would also outlive a silent sign-in that is about to land.
+    const changed = await listed.catch((reason: unknown) => {
+      if (accessError) return false;
+      throw reason;
+    });
     if (destroyed || client !== api) return;
     void openDeepLink();
     render();
