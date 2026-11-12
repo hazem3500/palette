@@ -84,6 +84,20 @@ it("signs in from a hidden frame without a click when the server allows it", asy
   );
 });
 
+it("shows no sign-in notice while the silent sign-in is under way", async () => {
+  serve(true);
+  controller = initComments(options);
+  const frame = await signInFrame();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  post(frame.contentWindow);
+  await vi.waitFor(() => expect(document.contains(frame)).toBe(false));
+
+  const notices = [...document.querySelectorAll("*")].flatMap((node) => [
+    ...(node.shadowRoot?.querySelectorAll(".floating-notice") ?? []),
+  ]);
+  expect(notices.map((notice) => notice.textContent)).toEqual([]);
+});
+
 it("tries once per tab, so a reviewer the proxy has not signed in is not retried on reload", async () => {
   serve(true);
   controller = initComments(options);
