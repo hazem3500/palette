@@ -4769,6 +4769,86 @@ export function initComments(options: CommentsOptions): CommentsController {
     });
   }
 
+  type SignedIn = { token: string; user: import("./types.js").Identity };
+  function signInMessage(data: unknown): SignedIn | null {
+    const message = data as {
+      type?: unknown;
+      token?: unknown;
+      user?: import("./types.js").Identity;
+    } | null;
+    if (message?.type !== "branch-comments:auth") return null;
+    const { token, user } = message;
+    return typeof token === "string" &&
+      user?.id &&
+      user.name &&
+      user.verified === true
+      ? { token, user }
+      : null;
+  }
+  // Remembers, for this tab, that a silent sign-in was tried, so a reviewer the
+  // proxy has not signed in gets one hidden attempt, not one per reload.
+  const silentSignInKey = `palette:${options.endpoint}:${options.project}:silent-sign-in`;
+  function rememberSilentSignIn(tried: boolean) {
+    try {
+      if (tried) sessionStorage.setItem(silentSignInKey, "1");
+      else sessionStorage.removeItem(silentSignInKey);
+    } catch {
+      /* Without storage each page load tries once. */
+    }
+  }
+  // Behind a sign-in proxy the browser is often already signed in. A hidden
+  // frame finishes the sign-in without a click; when the proxy needs the
+  // reviewer (or refuses to be framed), no message comes and the button stays.
+  async function silentSignIn() {
+    try {
+      if (sessionStorage.getItem(silentSignInKey)) return;
+    } catch {
+      /* Try once for this page load. */
+    }
+    rememberSilentSignIn(true);
+    const client = api;
+    const start = await client.request<{ url: string }>(
+      "auth/google/start",
+      "POST",
+      {},
+    );
+    if (destroyed || client !== api || client.token) return;
+    const url = new URL(start.url);
+    url.searchParams.set("frame", "1");
+    const frame = document.createElement("iframe");
+    frame.hidden = true;
+    frame.tabIndex = -1;
+    frame.setAttribute("aria-hidden", "true");
+    frame.src = url.href;
+    const signedIn = await new Promise<SignedIn | null>((resolve) => {
+      const finish = (result: SignedIn | null) => {
+        window.removeEventListener("message", listen);
+        abort.signal.removeEventListener("abort", cancel);
+        clearTimeout(timer);
+        frame.remove();
+        resolve(result);
+      };
+      const cancel = () => finish(null);
+      const listen = (event: MessageEvent) => {
+        if (event.origin !== url.origin || event.source !== frame.contentWindow)
+          return;
+        const message = signInMessage(event.data);
+        if (message) finish(message);
+      };
+      const timer = window.setTimeout(cancel, 10000);
+      window.addEventListener("message", listen);
+      abort.signal.addEventListener("abort", cancel);
+      (document.body ?? document.documentElement).append(frame);
+    });
+    if (!signedIn || destroyed || client !== api || client.token) return;
+    client.save(signedIn);
+    rememberSilentSignIn(false);
+    hydrateThreads();
+    render();
+    if (submitAfterIdentity) run(resumeSubmission);
+    else run(refresh);
+  }
+
   async function githubLogin(provider: "github" | "google" = "github") {
     const popup = window.open(
       "about:blank",
@@ -4784,21 +4864,11 @@ export function initComments(options: CommentsOptions): CommentsController {
       );
       const authOrigin = new URL(start.url).origin;
       const listen = (event: MessageEvent) => {
-        if (
-          event.origin !== authOrigin ||
-          event.source !== popup ||
-          event.data?.type !== "branch-comments:auth"
-        )
-          return;
-        const { token, user } = event.data;
-        if (
-          typeof token !== "string" ||
-          !user?.id ||
-          !user?.name ||
-          user.verified !== true
-        )
-          return;
-        api.save({ token, user });
+        if (event.origin !== authOrigin || event.source !== popup) return;
+        const signedIn = signInMessage(event.data);
+        if (!signedIn) return;
+        const { user } = signedIn;
+        api.save(signedIn);
         hydrateThreads();
         profileDraft = null;
         window.removeEventListener("message", listen);
@@ -5548,6 +5618,9 @@ export function initComments(options: CommentsOptions): CommentsController {
                 }
                 clearTimeout(profileSaveTimer);
                 queuedProfile = null;
+                // Signing out keeps this tab signed out rather than signing in
+                // again silently.
+                rememberSilentSignIn(true);
                 const signingOut = api.logout();
                 hydrateThreads();
                 profileDraft = null;
@@ -7207,6 +7280,7 @@ export function initComments(options: CommentsOptions): CommentsController {
       private?: boolean;
       tokens?: boolean;
       share?: boolean;
+      silentSignIn?: boolean;
       snapshots?: import("./snapshot.js").SnapshotLimits;
     };
     // Settle a stored session before starting reads: an expired token clears
@@ -7252,6 +7326,8 @@ export function initComments(options: CommentsOptions): CommentsController {
     // The list may already have failed with an expected anonymous 401.
     // Publish auth options before awaiting it so an open account can sign in.
     render();
+    if (config.silentSignIn === true && !client.token && !options.onboarding)
+      void silentSignIn().catch(() => {});
     const changed = await listed;
     if (destroyed || client !== api) return;
     void openDeepLink();

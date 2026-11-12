@@ -232,7 +232,9 @@ await writeFile(
 // merge, plus CI margin.
 // 250,200 -> 250,900: the comment box's share checkbox and the Account panel's "New comments" default
 // run at mount with the composer and account dialog they extend; 250,767 measured in CI, plus margin.
-if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 250_900)
+// 250,900 -> 251,300: silent sign-in behind a sign-in proxy runs at mount, before the button shows
+// (+337: 250,812 -> 251,149 measured on Boat against main), plus CI margin.
+if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 251_300)
   throw new Error("Palette exceeds its core production consumer bundle budget.");
 // The inline-text feature adds a small button/state bridge to the optional
 // Design mode entry. Its editor remains a separate on-demand chunk below.
