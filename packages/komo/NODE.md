@@ -57,7 +57,7 @@ Any other `PALETTE_PROXY_AUTH` value stops the server at startup with the list o
 
 The sign-in handlers are:
 
-- `PREFIX/auth/google/authorize`: the browser popup. It checks the one-use sign-in state from `/auth/google/start`, mints a session for the proxy's account without a Google redirect, and posts it to the site that opened it. The page sends `Cache-Control: no-store` and a nonce-based Content Security Policy with `frame-ancestors 'none'`.
+- `PREFIX/auth/google/authorize`: the browser popup. It checks the one-use sign-in state from `/auth/google/start`, mints a session for the proxy's account without a Google redirect, and posts it to the site that opened it. The page sends `Cache-Control: no-store` and a nonce-based Content Security Policy with `frame-ancestors 'none'`. With `frame=1` it is a silent sign-in instead: only the site that started the sign-in may frame it (`frame-ancestors` is that origin), and it posts the session to that site as its parent.
 - `POST PREFIX/auth/proxy/session?project=KEY` (older name `/auth/iap/session`): agents and CLIs exchange their proxy identity for a project session, returned as `{"token":…,"user":…}`. It's limited to 60 sessions an hour per account and project. It's only for clients that send no `Origin` header. A request whose `Origin` isn't the server's own is refused, and the response never carries CORS headers, so a web page can't turn a visitor's proxy sign-in into a token it can read.
 
 While a proxy is on:
@@ -72,7 +72,9 @@ While a proxy is on:
 
 Make sure clients can't reach the prefixed handlers without going through the proxy. The signed assertion check rejects forged headers either way.
 
-Proxy sign-in completes without a consent screen: a reviewer already signed in to the proxy gets a session as soon as the popup opens. Any page on an approved origin can open that popup, so keep `origins` tight. A `:*` port wildcard approves every port on that host, including any local development server.
+`/config` reports `silentSignIn: true`. When a reviewer has no session, the widget starts a sign-in once per tab in a hidden frame. A reviewer the proxy already knows is signed in without a click. If the proxy needs them to sign in, or refuses to be framed, nothing arrives within 10 seconds and the widget keeps the sign-in button. The proxy's cookie has to reach that frame, so this works when the site and the sign-in path are on the same site (for example `preview.example.com` and `labs.example.com`) and the proxy allows framing. Signing out keeps that tab signed out.
+
+Proxy sign-in completes without a consent screen: a reviewer already signed in to the proxy gets a session as soon as the popup opens. Any page on an approved origin can open that popup or frame, so keep `origins` tight. A `:*` port wildcard approves every port on that host, including any local development server.
 
 ### Reader, guest and session options
 

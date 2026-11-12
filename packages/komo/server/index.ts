@@ -611,7 +611,8 @@ async function finishSignIn(
   saved: SignInState,
   user: Identity,
   provider: "github" | "google",
-  via: SessionVia = provider
+  via: SessionVia = provider,
+  frame = false
 ) {
   const setupCode =
     env.PALETTE_HOSTED === "true" &&
@@ -624,6 +625,7 @@ async function finishSignIn(
     403,
     "Use Google to set up inline feedback."
   );
+  check(!setupCode || !frame, 400, "Set up inline feedback in a popup.");
   const created = setupCode
     ? await completeSetup(
         env,
@@ -648,26 +650,45 @@ async function finishSignIn(
       token: accessToken,
       user,
     },
-    saved.origin
+    saved.origin,
+    frame
   );
 }
 // The popup posts the session back to the site that opened it, then closes.
-function signedInPage(message: Record<string, unknown>, origin: string) {
+// A silent sign-in loads the page in a hidden frame instead: only the site
+// that started the sign-in may embed it, and only that site receives the
+// session, the same site a popup would post it to.
+function signedInPage(
+  message: Record<string, unknown>,
+  origin: string,
+  frame = false
+) {
   const nonce = crypto.randomUUID();
   const body = JSON.stringify(message).replace(/</g, "\\u003c");
   const target = JSON.stringify(origin).replace(/</g, "\\u003c");
+  const post = frame
+    ? `if(window.parent!==window)window.parent.postMessage(${body},${target});`
+    : `if(window.opener){window.opener.postMessage(${body},${target});window.close();}`;
   return new Response(
-    `<!doctype html><meta charset="utf-8"><title>Signed in</title><p>You’re signed in. You can close this window and return to your comments.</p><script nonce="${nonce}">if(window.opener){window.opener.postMessage(${body},${target});window.close();}</script>`,
+    `<!doctype html><meta charset="utf-8"><title>Signed in</title><p>You’re signed in. You can close this window and return to your comments.</p><script nonce="${nonce}">${post}</script>`,
     {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors 'none'`,
+        "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors ${frame && exactOrigin(origin) ? origin : "'none'"}`,
         "Cache-Control": "no-store",
         "Set-Cookie":
           "__Host-comments-oauth=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
       },
     }
   );
+}
+// An origin is safe to place in a CSP source list only in its serialized form.
+function exactOrigin(value: string) {
+  try {
+    return new URL(value).origin === value;
+  } catch {
+    return false;
+  }
 }
 // Records the account a sign-in proxy vouched for as a verified reviewer.
 async function proxyUser(env: Env, signedIn: ProxyIdentity) {
@@ -706,7 +727,8 @@ async function proxySignIn(
     saved,
     await proxyUser(env, signedIn),
     proxy.signIn,
-    "proxy"
+    "proxy",
+    url.searchParams.get("frame") === "1"
   );
 }
 // For agents and CLIs: a caller the proxy authenticated exchanges that
@@ -1168,6 +1190,9 @@ async function route(
       private: await privateAccess(env, project),
       guestResolve: config.allowGuestResolve !== false,
       tokens: !auth.proxy || auth.proxyAccessTokens,
+      // Behind a sign-in proxy the browser may already be signed in, so the
+      // client can try a sign-in in a hidden frame before showing the button.
+      silentSignIn: !!auth.proxy,
       // Element snapshots are opt-in on the client; guests need project consent.
       // Clients may send `share` on new threads and edit `/me/settings`.
       share: true,

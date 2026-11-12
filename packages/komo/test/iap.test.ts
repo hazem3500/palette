@@ -244,6 +244,32 @@ describe("proxy sign-in on D1", () => {
     );
   });
 
+  it("lets only the starting site frame a silent sign-in", async () => {
+    expect((await (await request("config")).json()).silentSignIn).toBe(true);
+    const start = await (
+      await request("auth/google/start", "POST", { data: {} })
+    ).json();
+    const authorize = new URL(start.url);
+    authorize.searchParams.set("frame", "1");
+    const page = await fetch(
+      new URL(authorize.pathname.slice(publicPath.length) + authorize.search, `http://localhost:${port}`),
+      { headers: { "x-goog-iap-jwt-assertion": await iapJwt() } },
+    );
+    expect(page.status).toBe(200);
+    const csp = page.headers.get("Content-Security-Policy")!;
+    expect(csp).toMatch(/; frame-ancestors http:\/\/localhost:4321$/);
+    const html = await page.text();
+    expect(html).toContain("window.parent.postMessage(");
+    expect(html).not.toContain("window.opener");
+    const message = JSON.parse(
+      html.match(/postMessage\((\{.*?\}),"http:\/\/localhost:4321"\)/)![1],
+    );
+    expect(message).toMatchObject({
+      type: "branch-comments:auth",
+      user: { id: "google:1234567890", verified: true },
+    });
+  });
+
   it("does not reuse a popup state", async () => {
     const start = await (
       await request("auth/google/start", "POST", { data: {} })
