@@ -27,7 +27,7 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-function serve(silentSignIn: boolean) {
+function serve(silentSignIn: boolean, threads: unknown[] = []) {
   const fetch = vi.fn((url: URL, init?: RequestInit) => {
     if (url.pathname.endsWith("/config"))
       return Promise.resolve(Response.json({ google: true, github: false, guests: false, guestResolve: false, silentSignIn }));
@@ -37,7 +37,7 @@ function serve(silentSignIn: boolean) {
     }
     const signedIn = new Headers(init?.headers).get("Authorization") === "Bearer session";
     if (url.pathname.endsWith("/threads") && signedIn)
-      return Promise.resolve(Response.json({ threads: [] }));
+      return Promise.resolve(Response.json({ threads, next: null }));
     return Promise.resolve(Response.json({ error: "Sign in to see comments." }, { status: 401 }));
   });
   vi.stubGlobal("fetch", fetch);
@@ -96,6 +96,33 @@ it("shows no sign-in notice while the silent sign-in is under way", async () => 
     ...(node.shadowRoot?.querySelectorAll(".floating-notice") ?? []),
   ]);
   expect(notices.map((notice) => notice.textContent)).toEqual([]);
+});
+
+it("opens a linked comment once the silent sign-in lets the comments load", async () => {
+  const target = document.createElement("p");
+  target.id = "target";
+  document.body.append(target);
+  history.replaceState(null, "", "/?inline-feedback=true&comment=linked");
+  const anchor = { selector: "#target", text: "", x: 0.5, y: 0.5, width: 0, height: 0, pageX: 0, pageY: 0, viewportWidth: 1200 };
+  serve(true, [
+    {
+      id: "linked",
+      page: "/",
+      resolved: false,
+      resolvedBy: null,
+      createdAt: 1,
+      updatedAt: 1,
+      anchor,
+      comments: [{ id: "c1", body: "Linked comment", author: user, createdAt: 1, editedAt: null, reactions: {} }],
+    },
+  ]);
+  controller = initComments(options);
+  const frame = await signInFrame();
+  post(frame.contentWindow);
+
+  // Opening the comment drops it from the address.
+  await vi.waitFor(() => expect(location.search).toBe("?inline-feedback=true"));
+  history.replaceState(null, "", "/");
 });
 
 it("tries once per tab, so a reviewer the proxy has not signed in is not retried on reload", async () => {

@@ -1985,6 +1985,8 @@ export function initComments(options: CommentsOptions): CommentsController {
         renderList();
         renderToolbar();
       }
+      // A linked comment may only be readable after a sign-in.
+      if (changed) void openDeepLink();
       return changed;
     } catch (reason) {
       if (
