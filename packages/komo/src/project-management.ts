@@ -188,7 +188,7 @@ export function projectManagement(
     webhookPanel.append(webhookSecretLabel);
     const eventInputs = new Map<string, HTMLInputElement>();
     for (const eventName of webhook.supportedEvents) {
-      const label = el("label", "account-name-label", eventName);
+      const label = el("label", "account-share", eventName);
       const checkbox = el("input");
       checkbox.type = "checkbox";
       checkbox.checked = webhook.events.includes(eventName);
@@ -196,7 +196,7 @@ export function projectManagement(
       label.prepend(checkbox);
       webhookPanel.append(label);
     }
-    const webhookEnabledLabel = el("label", "account-name-label", "Enable delivery");
+    const webhookEnabledLabel = el("label", "account-share", "Enable delivery");
     const webhookEnabled = el("input");
     webhookEnabled.type = "checkbox";
     webhookEnabled.checked = webhook.enabled;
@@ -297,11 +297,14 @@ export function projectManagement(
     content.append(
       button("Download comments", () => void action(download), "secondary")
     );
-    const migration = el("a", "project-help", "Move to self-hosting");
-    migration.href = "https://github.com/hazem3500/palette#quota-recovery-and-migration";
-    migration.target = "_blank";
-    migration.rel = "noopener noreferrer";
-    content.append(migration);
+    // Only a hosted project can move; a self-hosted one is already there.
+    if (details.hosted) {
+      const migration = el("a", "project-help", "Move to self-hosting");
+      migration.href = "https://github.com/hazem3500/palette#quota-recovery-and-migration";
+      migration.target = "_blank";
+      migration.rel = "noopener noreferrer";
+      content.append(migration);
+    }
     const danger = el("details", "project-danger");
     danger.append(el("summary", "", "Free space or delete project"));
     danger.append(
