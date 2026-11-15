@@ -2234,8 +2234,11 @@ export function initComments(options: CommentsOptions): CommentsController {
     const view = scaled
       ? { ...box, scale: 1, pan: false }
       : (frameControls?.view(box, windowSize) ?? frameView(box, windowSize, false));
-    if (useFrame && !scaled && wantsViewport()) {
-      if (shellWanted && !shell) enterShell();
+    // At the window's own size the page in place already matches a real viewport, so the
+    // single-copy shell, which reloads the tab both in and out, waits for another size.
+    const reloads = shellWanted && !shell;
+    if (useFrame && !scaled && wantsViewport() && !(reloads && (frameControls?.fitsWindow ?? true))) {
+      if (reloads) enterShell();
       else openViewport();
     } else if (shell && shellReady) return leaveShell();
     else if (viewport) closeViewport();
