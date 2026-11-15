@@ -15,6 +15,8 @@ export type FrameSizeControls = {
   sized: boolean;
   /** The reviewer wants a simulated viewport (only offered when the host enables it). */
   readonly separate: boolean;
+  /** The chosen size is the browser window's own, where the page in place already lays out for real. */
+  readonly fitsWindow: boolean;
   /**
    * The simulated viewport's state: showing the page in its own viewport, loading,
    * or showing the page itself because it can't, with the reason shown in the bar.
@@ -671,6 +673,9 @@ export function mountFrameSize(
     sized: size !== "window" || actual,
     get separate() {
       return separate;
+    },
+    get fitsWindow() {
+      return size === "window";
     },
     status(next) {
       state = next;

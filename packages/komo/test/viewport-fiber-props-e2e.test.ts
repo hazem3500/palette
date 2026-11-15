@@ -64,6 +64,8 @@ beforeAll(async () => {
       const schema=identity=>identity.name==='Button'?[
         {name:'variant',kind:'enum',required:true,values:['primary','secondary','ghost'],typeLabel:'"primary" | "secondary" | "ghost"'},
         {name:'pill',kind:'boolean',required:true,typeLabel:'boolean'}]:undefined;
+      // The shell loads only for a size other than the window's own: the Laptop preset, the window's size here.
+      {const sizeKey='palette:frame-size:'+project+':example/review';if(mode==='shell'&&!localStorage.getItem(sizeKey))localStorage.setItem(sizeKey,JSON.stringify({v:2,size:[1280,800],actual:false}));}
       window.palette=initPalette({endpoint:location.origin,project,repo:'example/review',branch:'fixture',pageRoot:document.querySelector('main'),sidebar:'background',restoreOpen:false,pollInterval:60000,
         design:{components:discoverReactComponents({edit:true,schema})},
         ...(mode==='inplace'?{}:{frame:{mode:'iframe',shell:mode==='shell'}})});

@@ -71,6 +71,8 @@ beforeAll(async () => {
         return Response.json(path.endsWith('/me')?{user}:path.endsWith('/config')?{guests:true,guestResolve:true}:path.endsWith('/threads')?{threads:stored()}:{});
       };
       const components={identify(element){const host=element.closest('[data-c]');return host?{name:host.dataset.c,element:host}:null;}};
+      // The shell loads only for a size other than the window's own: the Laptop preset, the window's size here.
+      {const sizeKey='palette:frame-size:'+project+':example/review';if(params.has('shell')&&!localStorage.getItem(sizeKey))localStorage.setItem(sizeKey,JSON.stringify({v:2,size:[1280,800],actual:false}));}
       window.palette=initPalette({endpoint:location.origin,project,repo:'example/review',branch:'fixture',pageRoot:document.getElementById('root'),sidebar:'background',restoreOpen:false,pollInterval:60000,
         design:{experimentalGeometry:true,components},
         frame:{mode:'iframe',shell:params.has('shell'),...(params.has('inplace')?{defaultMode:'transform'}:{})}});

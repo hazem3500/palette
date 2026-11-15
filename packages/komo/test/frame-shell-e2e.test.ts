@@ -51,6 +51,9 @@ beforeAll(async () => {
         const path=new URL(input instanceof URL?input.href:typeof input==='string'?input:input.url,location.origin).pathname;
         return Response.json(path.endsWith('/me')?{user}:path.endsWith('/config')?{guests:true,guestResolve:true}:path.endsWith('/threads')?{threads:[]}:{});
       };
+      // A device size, since the window's own size stays in place without the shell.
+      const sizeKey='palette:frame-size:'+project+':example/review';
+      if(!params.has('windowsize')&&!localStorage.getItem(sizeKey))localStorage.setItem(sizeKey,JSON.stringify({v:2,size:[768,1024],actual:false}));
       if(!params.has('nopalette'))window.palette=initPalette({endpoint:location.origin,project,repo:'example/review',branch:'fixture',pageRoot:document.querySelector('main'),sidebar:'background',
         restoreOpen:params.has('restore')?'session':false,pollInterval:60000,
         frame:{mode:'iframe',shell:true,...(params.get('url')?{iframeUrl:()=>params.get('url')}:{})}});
@@ -148,6 +151,23 @@ describe.skipIf(!chrome)("Frame single-copy shell", () => {
     expect(await frame.evaluate(() => [location.search, [...document.body.children].filter((node) => node.shadowRoot).length])).toEqual(["", 0]);
     await page.screenshot({ path: join(shots, "shell.png") });
     expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("stays on the page at the window's own size, and reloads into the shell only for another size", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await load(page, "?windowsize");
+    await page.waitForFunction(() => !!(window as any).palette);
+    await page.keyboard.press("l");
+    await page.locator(".frame-size-trigger").waitFor();
+    await page.waitForTimeout(300);
+    expect(await state(page)).toMatchObject({ shell: false, mounts: ["top"], appOnTop: true });
+    expect(page.url()).toBe(`${origin}/?windowsize`);
+    await page.locator(".frame-size-trigger").click();
+    await page.getByRole("menuitemradio", { name: /Tablet/ }).click();
+    await page.waitForURL(/palette-shell=[0-9a-f]{32}/);
+    await viewportFrame(page);
+    expect(await state(page)).toMatchObject({ shell: true, mounts: ["frame"] });
     await page.close();
   });
 
