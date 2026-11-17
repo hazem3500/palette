@@ -97,6 +97,7 @@ export function postgresDatabase(connectionString: string, pg: Pg) {
           "007_session_origin.sql",
           "008_webhook_outbox.sql",
           "009_user_share_comments.sql",
+          "010_project_bot_tokens.sql",
         ];
         if (
           versions.rows.length > 1 ||

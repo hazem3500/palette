@@ -1,3 +1,4 @@
+import { createBotToken } from "./bot-tokens";
 import { importProject } from "./import-project";
 import { projectSites, saveProjectSites } from "./project-sites";
 import { check, string } from "./validation";
@@ -23,6 +24,11 @@ export async function privateAccess(env: Env, project: string) {
   );
 }
 export async function requireMember(env: Env, project: string, user: Identity) {
+  if (user.id.startsWith("bot:")) {
+    const grant = await env.DB.prepare("SELECT id FROM project_bot_tokens WHERE user_id=? AND project=? AND revoked_at IS NULL").bind(user.id, project).first();
+    check(grant, 403, "This bot is not allowed for this project.");
+    return;
+  }
   check(
     user.verified && user.id.startsWith("google:"),
     403,
@@ -86,6 +92,17 @@ export async function manageProject(
     return Response.json({ ok: true });
   }
   await googleOwner(env, project, user);
+  if (path === "/project/bots" && request.method === "POST")
+    return Response.json(await createBotToken(env, project, user.id, await readBody()), { status: 201 });
+  if (path === "/project/bots" && request.method === "GET") {
+    const rows = await env.DB.prepare("SELECT id,user_id,created_at,revoked_at FROM project_bot_tokens WHERE project=? ORDER BY created_at DESC").bind(project).all();
+    return Response.json({ bots: rows.results });
+  }
+  const botId = /^\/project\/bots\/([a-f0-9-]{36})$/.exec(path)?.[1];
+  if (botId && request.method === "DELETE") {
+    await env.DB.prepare("UPDATE project_bot_tokens SET revoked_at=? WHERE id=? AND project=? AND revoked_at IS NULL").bind(Date.now(), botId, project).run();
+    return Response.json({ ok: true });
+  }
   if (path === "/project/webhook" && request.method === "GET") {
     const row = await env.DB.prepare(
       "SELECT webhook_url,webhook_secret,webhook_events,webhook_enabled FROM project_settings WHERE project=?"

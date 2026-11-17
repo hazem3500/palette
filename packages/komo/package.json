@@ -31,6 +31,7 @@
     "server/iap.ts",
     "server/proxy-auth.ts",
     "server/tokens.ts",
+    "server/bot-tokens.ts",
     "server/account-page.ts",
     "server/public-env.ts",
     "server/snapshots.ts",

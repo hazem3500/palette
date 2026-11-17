@@ -18,6 +18,10 @@ export type WebhookEvent = {
   pageUrl: string;
   selector: string;
   author: string;
+  /** Stable identity for consumers to reject their own bot replies. */
+  authorId?: string;
+  /** The comment that emitted this event, not the thread's first comment. */
+  commentId?: string;
   body: string | null;
   snapshotStatus?: "pending" | "skipped";
   /** Present and false when the reviewer chose to keep this comment in Palette. */
@@ -221,7 +225,7 @@ export function enqueueWebhook(
     .bind(
       event.id,
       project,
-      JSON.stringify(event),
+      JSON.stringify({ ...event, commentId }),
       Date.now(),
       commentId,
       project,
