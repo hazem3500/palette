@@ -1830,6 +1830,10 @@ describe("owner management and private projects", () => {
     expect((await call("/threads", "POST", { page: "/bot-test", anchor, body: "no" }, bot.token)).status).toBe(403);
     expect((await call(`/project/bots/${bot.id}`, "DELETE")).status).toBe(200);
     expect((await call(`/threads/${id}/comments`, "POST", { body: "no" }, bot.token)).status).toBe(401);
+    // This suite shares the managed project; leave no extra thread for later
+    // export and cleanup assertions, which count its existing fixtures.
+    expect((await call(`/threads/${id}`, "PATCH", { resolved: true })).status).toBe(200);
+    expect((await call("/project/clear-resolved", "POST", { confirm: "managed", threadIds: [id] })).status).toBe(200);
   });
   it("keeps webhook secrets encrypted and refuses delivery without a secure sender", async () => {
     const secret = "test-signing-secret-0123456789abcdef";
