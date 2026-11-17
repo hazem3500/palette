@@ -1814,6 +1814,23 @@ describe("owner management and private projects", () => {
     token = "managed-owner",
     project = "managed"
   ) => request(path, method, data, token, "shared", "owner/site", project);
+  it("lets an owner grant a bot reply access and revoke it without granting administration", async () => {
+    const issued = await call("/project/bots", "POST", { name: "Toki" });
+    const bot = await issued.json();
+    expect(issued.status, JSON.stringify(bot)).toBe(201);
+    const created = await call("/threads", "POST", { page: "/bot-test", anchor, body: "#toki help" });
+    expect(created.status).toBe(201);
+    const { id } = await created.json();
+    expect((await call(`/threads/${id}/comments`, "POST", { body: "On it" }, bot.token)).status).toBe(201);
+    const listing = await (await call(`/threads?id=${id}`, "GET", undefined, bot.token)).json();
+    const reply = listing.threads.find((thread: Thread) => thread.id === id).comments.at(-1);
+    expect(reply.author.id).toBe(bot.userId);
+    expect(reply.author.name).toBe("Toki");
+    expect((await call("/project", "GET", undefined, bot.token)).status).toBe(403);
+    expect((await call("/threads", "POST", { page: "/bot-test", anchor, body: "no" }, bot.token)).status).toBe(403);
+    expect((await call(`/project/bots/${bot.id}`, "DELETE")).status).toBe(200);
+    expect((await call(`/threads/${id}/comments`, "POST", { body: "no" }, bot.token)).status).toBe(401);
+  });
   it("keeps webhook secrets encrypted and refuses delivery without a secure sender", async () => {
     const secret = "test-signing-secret-0123456789abcdef";
     expect((await call("/project/webhook")).status).toBe(200);

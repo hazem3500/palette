@@ -1,3 +1,4 @@
+import { authenticateBotToken, isBotToken } from "./bot-tokens";
 import { projectSites, saveProjectSites } from "./project-sites";
 import {
   manageProject,
@@ -110,7 +111,7 @@ function webhookEvent(
   threadId: string,
   page: string,
   anchor: string,
-  author: string,
+  author: Identity,
   body: string | null,
   origin: string
 ): WebhookEvent {
@@ -130,7 +131,8 @@ function webhookEvent(
     threadId,
     pageUrl: new URL(page, origin).toString(),
     selector,
-    author,
+    author: author.name,
+    authorId: author.id,
     body,
   };
 }
@@ -179,6 +181,8 @@ async function body(request: Request): Promise<Record<string, unknown>> {
               ? ["user"]
               : path === "/project/sites"
                 ? ["sites"]
+                : path === "/project/bots"
+                  ? ["name"]
                 : path === "/project/webhook"
                   ? ["url", "secret", "events", "enabled"]
                 : ["access", "confirm", "threadIds"]
@@ -308,6 +312,7 @@ async function authenticate(
     ?.match(/^Bearer (.{1,200})$/)?.[1];
   check(bearer, 401, "Enter your name to comment.");
   const { proxy, proxyAccessTokens, sessionMaxAge, allowGuests } = authOptions(env);
+  if (isBotToken(bearer)) return identity(await authenticateBotToken(env, bearer, project, access, request));
   if (isPersonalToken(bearer)) {
     check(
       !proxy || proxyAccessTokens,
@@ -1628,7 +1633,7 @@ async function route(
           id,
           page,
           JSON.stringify(anchor),
-          user.name,
+          user,
           text,
           origin || url.origin
         ), ...(snapshotStatus ? { snapshotStatus } : {}), ...(data.share === false ? { share: false } : {}) }, firstCommentId),
@@ -1864,7 +1869,7 @@ async function route(
       ).bind(Number(data.resolved), data.resolved ? user.id : null, now, threadId),
       ...(firstComment ? [enqueueWebhook(env.DB, project, webhookEvent(
         "comment.resolved", project, repo, branch, threadId, thread.page,
-        thread.anchor, user.name, null, origin || url.origin
+        thread.anchor, user, null, origin || url.origin
       ), firstComment.id)] : []),
     ]);
     ctx.waitUntil(drainWebhooks(env));
@@ -1893,7 +1898,7 @@ async function route(
           threadId,
           thread.page,
           thread.anchor,
-          user.name,
+          user,
           text,
           origin || url.origin
         ), replyId),
