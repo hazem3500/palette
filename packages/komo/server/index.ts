@@ -1975,17 +1975,14 @@ async function route(
       403, "Guests cannot attach images in this project.");
     await limit(env, `${project}:snapshot:${user.id}`, 60, 600);
     const image = await readSnapshot(request, "image");
-    const [stored] = await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO comment_images(comment_id,project,mime,bytes,size,created_at)
-         SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM comments WHERE id=? AND body<>'[Comment deleted]')
-         AND (SELECT COALESCE(SUM(size),0) FROM comment_images WHERE project=? AND comment_id<>?)
-         + (SELECT COALESCE(SUM(s.size),0) FROM snapshots s JOIN threads t ON t.id=s.thread_id WHERE t.project=?)
-         + ? <= ? ON CONFLICT(comment_id) DO UPDATE SET mime=excluded.mime,bytes=excluded.bytes,size=excluded.size,created_at=excluded.created_at`
-      ).bind(commentId, project, image.mime, image.bytes, image.bytes.length, now, commentId,
-        project, commentId, project, image.bytes.length, snapshotCap(config.maxSnapshotBytes)),
-      env.DB.prepare("UPDATE threads SET updated_at=? WHERE id=?").bind(now, threadId),
-    ]);
+    const stored = await env.DB.prepare(
+      `INSERT INTO comment_images(comment_id,project,mime,bytes,size,created_at)
+       SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM comments WHERE id=? AND body<>'[Comment deleted]')
+       AND (SELECT COALESCE(SUM(size),0) FROM comment_images WHERE project=? AND comment_id<>?)
+       + (SELECT COALESCE(SUM(s.size),0) FROM snapshots s JOIN threads t ON t.id=s.thread_id WHERE t.project=?)
+       + ? <= ? ON CONFLICT(comment_id) DO UPDATE SET mime=excluded.mime,bytes=excluded.bytes,size=excluded.size,created_at=excluded.created_at`
+    ).bind(commentId, project, image.mime, image.bytes, image.bytes.length, now, commentId,
+      project, commentId, project, image.bytes.length, snapshotCap(config.maxSnapshotBytes)).run();
     check(stored.meta.changes, 409, "Could not attach the image. Check the comment and the project storage limit.");
     return json({ ok: true }, 201);
   }

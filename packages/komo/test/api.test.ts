@@ -17,6 +17,7 @@ let directory = "",
   port = 0,
   output = "";
 const origin = "http://localhost:4321";
+const smallPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kE9sAAAAASUVORK5CYII=", "base64");
 const anchor = {
   selector: "#hero",
   text: "Workers",
@@ -111,7 +112,7 @@ beforeAll(async () => {
     scopes: { repo: "owner/site", origins: [origin] },
     // Isolate these integration fixtures from the heavily used "test" rate limits.
     sharing: { repo: "owner/site", origins: [origin] },
-    attachments: { repo: "owner/site", origins: [origin] },
+    attachments: { repo: "owner/site", origins: [origin], maxSnapshotBytes: 128 },
     strict: { repo: "owner/site", origins: [origin], allowGuestResolve: false },
     demo: { repo: "owner/site", origins: [origin], retainedCommentsPerUser: 3 },
     snapshots: {
@@ -1838,6 +1839,20 @@ describe("owner management and private projects", () => {
     const reply = listing.threads.find((thread: Thread) => thread.id === id).comments.at(-1);
     expect(reply.author.id).toBe(bot.userId);
     expect(reply.author.name).toBe("Toki");
+    const botImage = (targetComment: string, method: "GET" | "PUT") => {
+      const url = new URL(`/threads/${id}/comments/${targetComment}/image`, `http://localhost:${port}`);
+      url.search = new URLSearchParams({ project: "managed", repo: "owner/site", branch: "shared" }).toString();
+      return fetch(url, {
+        method,
+        headers: { Origin: origin, Authorization: `Bearer ${bot.token}`, "Content-Type": "image/png" },
+        body: method === "PUT" ? smallPng : undefined,
+      });
+    };
+    expect((await botImage(commentId, "PUT")).status).toBe(403);
+    expect((await botImage(reply.id, "PUT")).status).toBe(201);
+    const saved = await botImage(reply.id, "GET");
+    expect(saved.status).toBe(200);
+    expect(Buffer.from(await saved.arrayBuffer())).toEqual(smallPng);
     expect((await call("/project", "GET", undefined, bot.token)).status).toBe(403);
     expect((await call("/threads", "POST", { page: "/bot-test", anchor, body: "no" }, bot.token)).status).toBe(403);
     expect((await call(`/project/bots/${bot.id}`, "DELETE")).status).toBe(200);
@@ -2719,22 +2734,30 @@ describe("personal access tokens", () => {
     const path = `/threads/${threadId}/comments/${commentId}`;
     const url = new URL(`${path}/image`, `http://localhost:${port}`);
     url.search = new URLSearchParams({ project, repo: "owner/site", branch: "shared" }).toString();
-    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kE9sAAAAASUVORK5CYII=", "base64");
-    const added = await fetch(url, {
-      method: "PUT", headers: { Origin: origin, Authorization: `Bearer ${token}`, "Content-Type": "image/png" }, body: png,
+    const upload = (image: Buffer) => fetch(url, {
+      method: "PUT", headers: { Origin: origin, Authorization: `Bearer ${token}`, "Content-Type": "image/png" }, body: image,
     });
-    expect(added.status).toBe(201);
+    const readThread = async () => {
+      const { threads } = await (await request(`/threads?id=${threadId}`, "GET", undefined, token, "shared", "owner/site", project)).json();
+      return threads[0] as Thread;
+    };
+    await sql(`UPDATE threads SET updated_at=1 WHERE id='${threadId}'`);
+    expect((await upload(smallPng)).status).toBe(201);
+    expect((await readThread()).updatedAt).toBeGreaterThan(1);
+    await sql(`UPDATE threads SET updated_at=2 WHERE id='${threadId}'`);
+    expect((await upload(Buffer.concat([smallPng, Buffer.alloc(128)]))).status).toBe(409);
+    expect((await readThread()).updatedAt).toBe(2);
     expect((await request(`${path}/reactions`, "POST", { emoji: "👍", active: true }, token, "shared", "owner/site", project)).status).toBe(200);
     expect((await fetch(url, { headers: { Origin: origin } })).status).toBe(401);
     const image = await fetch(url, { headers: { Origin: origin, Authorization: `Bearer ${token}` } });
     expect(image.headers.get("Content-Type")).toBe("image/png");
-    expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
-    const { threads } = await (await request(`/threads?id=${threadId}`, "GET", undefined, token, "shared", "owner/site", project)).json();
-    expect(threads[0].comments[1]).toMatchObject({
+    expect(Buffer.from(await image.arrayBuffer())).toEqual(smallPng);
+    const listed = await readThread();
+    expect(listed.comments[1]).toMatchObject({
       author: { id: "google:fixture" }, apiKeyName: "CI bot", body: "**Looks good**",
       image: expect.stringContaining(path + "/image"), reactions: { "👍": ["google:fixture"] },
     });
-    expect(JSON.stringify(threads)).not.toContain(token);
+    expect(JSON.stringify(listed)).not.toContain(token);
     expect((await account(`/account/tokens/${body.item.id}`, "DELETE", "owner-token")).status).toBe(200);
   });
 

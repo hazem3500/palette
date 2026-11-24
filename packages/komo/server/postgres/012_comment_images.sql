@@ -16,6 +16,10 @@ BEGIN
   ELSE
     PERFORM komo_quota(OLD.project,0,-(OLD.size+256));
   END IF;
+  IF TG_OP<>'DELETE' THEN
+    UPDATE threads SET updated_at=GREATEST(updated_at,NEW.created_at)
+      WHERE id=(SELECT thread_id FROM comments WHERE id=NEW.comment_id);
+  END IF;
   RETURN COALESCE(NEW,OLD);
 END $$;
 CREATE TRIGGER comment_image_quota AFTER INSERT OR UPDATE OR DELETE ON comment_images FOR EACH ROW EXECUTE FUNCTION komo_comment_image_quota();
