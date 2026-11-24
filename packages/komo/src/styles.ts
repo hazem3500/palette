@@ -1214,12 +1214,15 @@ ${morphingMenuStyles}
 .draft-share input,
 .account-layer .account .account-share input,
 .account-layer .account .account-share input:focus { appearance: auto; flex: none; width: 14px; height: 14px; min-width: 14px; min-height: 0; margin: 0; padding: 0; background: none; box-shadow: none; accent-color: var(--accent, #bda6ef); cursor: pointer; }
-.draft-share { font-size: 12px; }
-.new-comment-composer .draft-image { justify-self: start; min-height: 32px; color: #e6e6e6; background: #ffffff14; }
+.new-comment-composer .draft-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-width: 0; }
+.draft-share { font-size: 12px; color: #a5a5a5; }
+.draft-share:has(:focus-visible) { color: #e6e6e6; }
+@media (hover: hover) and (pointer: fine) { .draft-share:hover { color: #e6e6e6; } }
+.new-comment-composer .draft-image { flex: none; min-height: 32px; color: #e6e6e6; background: #ffffff14; }
 .message-text code { padding: 0 3px; border-radius: 3px; background: #8882; }
 .message-text pre { margin: 4px 0; padding: 8px; overflow: auto; border-radius: 6px; background: #8882; white-space: pre; }
 .message-text pre code { padding: 0; background: none; }
-@media (pointer: coarse) { .new-comment-composer .draft-image { min-height: 44px; } }
+@media (pointer: coarse) { .new-comment-composer .draft-image, .draft-share { min-height: 44px; } }
 .api-key-tag { min-width: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border-radius: 4px; background: #8882; font-size: 10px; }
 .account-share input:focus-visible, .draft-share input:focus-visible { outline: 2px solid var(--accent, #bda6ef); outline-offset: 2px; }
 .account .selection-menu > summary.selection-trigger {
