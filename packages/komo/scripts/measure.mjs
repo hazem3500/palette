@@ -239,8 +239,9 @@ await writeFile(
 // 250,900 -> 251,300: silent sign-in behind a sign-in proxy runs at mount, before the button shows
 // (+337: 250,812 -> 251,149 measured on Boat against main), plus CI margin.
 // Area capture, rich comments, saved review state and image markup measured
-// 256,655 bytes in CI with the optional chunks included. Keep the startup limit.
-if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 257_000)
+// 256,655 bytes in CI with the optional chunks included.
+// Native overlay support and capture-before-focus bring that to 257,287. Keep the startup limit.
+if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 257_500)
   throw new Error("Palette exceeds its core production consumer bundle budget.");
 // The inline-text feature adds a small button/state bridge to the optional
 // Design mode entry. Its editor remains a separate on-demand chunk below.
