@@ -8,6 +8,7 @@
 // when a snapshot is replaced) and shown through a blob URL that is revoked as soon
 // as its element leaves Palette's UI. HTML is only ever shown as text.
 import { button, el } from "./dom.js";
+import type { ImageMarkup } from "./snapshot-annotate.js";
 import type { Thread } from "./types.js";
 
 export interface SnapshotContext {
@@ -26,7 +27,7 @@ export interface SnapshotContext {
   remove(thread: Thread): void;
 }
 type Snapshotted = Pick<Thread, "anchor" | "snapshot" | "page" | "id">;
-type Pending = { image?: string; html?: string; note?: string };
+type Pending = { image?: string; html?: string; note?: string; markup?: ImageMarkup };
 
 const css = `.palette-snapshot{display:block;width:fit-content;margin-top:8px;padding:0;border:0;border-radius:6px;background:none;color:inherit;font:inherit;cursor:zoom-in;line-height:0}
 .palette-snapshot img{display:block;width:72px;height:48px;border-radius:6px;object-fit:contain;background:color-mix(in oklab,currentColor 8%,transparent);outline:1px solid color-mix(in oklab,currentColor 16%,transparent);outline-offset:-1px}
@@ -43,8 +44,10 @@ const css = `.palette-snapshot{display:block;width:fit-content;margin-top:8px;pa
 .palette-snapshot-code{box-sizing:border-box;max-height:160px;margin:0;padding:8px;overflow:auto;border-radius:6px;background:color-mix(in oklab,currentColor 8%,transparent);font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-width:thin}
 .palette-snapshot-code:focus-visible{outline:2px solid var(--accent,#bda6ef);outline-offset:2px}
 .palette-snapshot-text{justify-self:start;margin-top:8px;padding:4px 8px;border:0;border-radius:6px;background:color-mix(in oklab,currentColor 8%,transparent);color:inherit;font-family:inherit;font-size:11px;line-height:1.4;cursor:pointer}
-.palette-snapshot-draft{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:#999}
-.palette-snapshot-draft .palette-snapshot{margin:0}
+.palette-snapshot-draft{display:grid;grid-template-columns:1fr auto;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:#999}
+.palette-snapshot-draft .palette-snapshot{grid-column:1/-1;width:100%;margin:0;background:#ffffff08}
+.palette-snapshot-draft .palette-snapshot img{width:100%;height:94px;object-fit:contain}
+.palette-snapshot-draft .palette-snapshot:hover img{outline-color:var(--accent,#bda6ef)}
 .palette-snapshot-draft span{flex:1;min-width:0}
 .palette-snapshot-draft .icon{width:28px;height:28px}
 .palette-snapshot-viewer{box-sizing:border-box;max-width:min(1200px,calc(100vw - 32px));max-height:calc(100dvh - 32px);margin:auto;padding:12px;overflow:hidden;border:0;border-radius:16px;background:#242424;color:#eee;box-shadow:inset 0 0 0 1px #ffffff1f,0 24px 64px -16px rgb(0 0 0/55%);font:12px/1.4 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;pointer-events:auto;color-scheme:dark}
@@ -383,11 +386,15 @@ function draft(shot: Pending, anchor: Thread["anchor"], context: SnapshotContext
     open.type = "button";
     open.dataset.ready = "";
     open.setAttribute("aria-haspopup", "dialog");
+    open.setAttribute("aria-label", "Open image preview");
     const image = el("img");
     image.alt = alt;
     image.src = shot.image;
     open.append(image);
-    open.addEventListener("click", () => void openSnapshotViewer(context.root, { src: shot.image, alt }));
+    open.addEventListener("click", () => {
+      if (context.annotate) context.annotate(anchor, shot);
+      else void openSnapshotViewer(context.root, { src: shot.image, alt });
+    });
     row.append(open);
   }
   row.append(el("span", "", shot.image ? (shot.html ? "Snapshot and HTML attached" : "Snapshot attached") : "HTML snapshot attached"));
@@ -396,8 +403,6 @@ function draft(shot: Pending, anchor: Thread["anchor"], context: SnapshotContext
     row.closest("form")?.querySelector("textarea")?.focus();
     row.remove();
   }, "icon", "trash");
-  if (shot.image && context.annotate)
-    row.append(button("Annotate image", () => context.annotate?.(anchor, shot), "secondary"));
   row.append(drop);
   return row;
 }

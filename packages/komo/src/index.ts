@@ -704,9 +704,9 @@ export function initComments(options: CommentsOptions): CommentsController {
       const limit = snapshotLimits?.maxImageBytes;
       if (draft !== anchor || !limit || !shot.image) return;
       void import("./snapshot-annotate.js").then(({ annotateImage }) =>
-        annotateImage(shadow, shot.image!, limit, (image) => {
+        annotateImage(shadow, shot.image!, limit, shot.markup, abort.signal, (image, markup) => {
           if (draft !== anchor || destroyed) return;
-          draftImages.set(anchor, Promise.resolve({ ...shot, image }));
+          draftImages.set(anchor, Promise.resolve({ ...shot, image, markup }));
           renderDialog();
         }),
       ).catch(() => notify("The image editor could not open."));
@@ -5484,7 +5484,7 @@ export function initComments(options: CommentsOptions): CommentsController {
         copy("Copy link", () => {
           // A host may group comments by a workspace-independent path.
           const current = pageFrame()?.contentWindow?.location ?? location;
-          const url = new URL(thread.page === page() ? current.pathname + current.search : thread.page, location.origin);
+          const url = new URL(thread.page === page() ? current.pathname : thread.page, location.origin);
           url.searchParams.set("comment", thread.id);
           return url.href;
         }),

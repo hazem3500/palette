@@ -5,6 +5,7 @@
 // foreignObject with its computed styles inlined, drawn to a canvas and encoded as
 // WebP; the HTML is a trimmed, redacted outerHTML. Both read the page's own
 // document, which is Frame's viewport iframe when the page is framed.
+import type { ImageMarkup } from "./snapshot-annotate.js";
 import type { PaletteSnapshots } from "./types.js";
 
 /** Why the image was left out; the HTML snapshot then starts with a comment saying so. */
@@ -12,6 +13,7 @@ export type SnapshotNote = "cross-origin" | "too-large" | "unsupported" | "faile
 export interface CapturedSnapshot {
   /** A `data:image/webp` URL of the element and some padding. */
   image?: string;
+  markup?: ImageMarkup;
   /** Trimmed outerHTML without scripts, handlers or typed values. */
   html?: string;
   note?: SnapshotNote;
@@ -313,14 +315,29 @@ function backdrop(element: Element, view: Window) {
 }
 
 /** The element as an SVG image with every computed style inlined. */
-async function render(element: Element, redact: ((element: Element) => boolean) | undefined, scale: number) {
+async function render(element: Element, redact: ((element: Element) => boolean) | undefined, region?: Crop) {
   const page = element.ownerDocument;
   const view = page.defaultView!;
   const rect = element.getBoundingClientRect();
   // Layout size, not the on-screen one: Frame may scale the page.
   const width = (element as HTMLElement).offsetWidth ?? rect.width;
-  const height = Math.min((element as HTMLElement).offsetHeight ?? rect.height, MAX_HEIGHT);
+  const layoutHeight = (element as HTMLElement).offsetHeight ?? rect.height;
+  const height = Math.min(layoutHeight, MAX_HEIGHT);
   if (!width || !height) throw new Skip("failed");
+  const outer = { width: width + PADDING * 2, height: height + PADDING * 2 };
+  const crop = region ? {
+    x: PADDING + region.x * width,
+    y: PADDING + region.y * layoutHeight,
+    width: region.width * width,
+    height: Math.min(region.height * layoutHeight, height - region.y * layoutHeight),
+  } : { x: 0, y: 0, ...outer };
+  if (crop.width <= 0 || crop.height <= 0) throw new Skip("too-large");
+  const density = region ? Math.min(3, MAX_WIDTH / crop.width, MAX_HEIGHT / crop.height) : 1;
+  const output = {
+    width: Math.max(1, Math.round(crop.width * density)),
+    height: Math.max(1, Math.round(crop.height * density)),
+  };
+  const scale = region ? density : Math.min(view.devicePixelRatio || 1, 2, MAX_WIDTH / outer.width);
   const base = baselines();
   const pending: Promise<unknown>[] = [];
   const families = new Set<string>();
@@ -417,12 +434,11 @@ async function render(element: Element, redact: ((element: Element) => boolean) 
     const sheet = page.createElement("style");
     sheet.textContent = (await fontFaces(page, families, view)) + pseudo;
     wrapper.append(sheet, root);
-    const outer = { width: width + PADDING * 2, height: height + PADDING * 2 };
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outer.width}" height="${outer.height}"><foreignObject x="0" y="0" width="100%" height="100%">${new XMLSerializer().serializeToString(wrapper)}</foreignObject></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${output.width}" height="${output.height}" viewBox="${crop.x} ${crop.y} ${crop.width} ${crop.height}"><foreignObject x="0" y="0" width="${outer.width}" height="${outer.height}">${new XMLSerializer().serializeToString(wrapper)}</foreignObject></svg>`;
     const image = new Image();
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
     await image.decode();
-    return { image, ...outer };
+    return { image, ...output };
   } finally {
     base.dispose();
   }
@@ -465,21 +481,9 @@ export async function imageDataUrl(image: CanvasImageSource, crop: Crop, limit: 
 
 /** The selected region or the whole element as WebP. */
 export async function snapshotImage(element: Element, options: PaletteSnapshots = {}, region?: Crop): Promise<string> {
-  const view = element.ownerDocument.defaultView ?? window;
-  const width = (element as HTMLElement).offsetWidth || element.getBoundingClientRect().width;
-  const density = view.devicePixelRatio || 1;
-  const scale = Math.min(density, 2, MAX_WIDTH / (width + PADDING * 2));
-  const drawn = await render(element, options.redact, scale);
-  const w = drawn.width - PADDING * 2, h = drawn.height - PADDING * 2;
-  const layoutHeight = (element as HTMLElement).offsetHeight || element.getBoundingClientRect().height;
-  const crop = region ? {
-    x: PADDING + region.x * w,
-    y: PADDING + region.y * layoutHeight,
-    width: region.width * w,
-    height: Math.min(region.height * layoutHeight, h - region.y * layoutHeight),
-  } : { x: 0, y: 0, width: drawn.width, height: drawn.height };
-  if (crop.width <= 0 || crop.height <= 0) throw new Skip("too-large");
-  return imageDataUrl(drawn.image, crop, options.maxBytes ?? IMAGE_BYTES, density);
+  const density = region ? 1 : element.ownerDocument.defaultView?.devicePixelRatio || 1;
+  const { image, width, height } = await render(element, options.redact, region);
+  return imageDataUrl(image, { x: 0, y: 0, width, height }, options.maxBytes ?? IMAGE_BYTES, density);
 }
 
 export async function imageAttachment(file: File, limit: number): Promise<CapturedSnapshot> {
