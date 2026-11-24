@@ -5083,9 +5083,10 @@ export function initComments(options: CommentsOptions): CommentsController {
       send.disabled = pending || !input.value.trim();
       if (!input.closest<HTMLElement>(".sidebar-replies")?.hidden) resizeInput();
     });
+    const footer = el("div", "draft-footer");
     if (!thread && draft && sharing()) {
       const anchor = draft;
-      form.append(shareToggle(options.share!.label, draftSharing.get(anchor) ?? api.shareComments,
+      footer.append(shareToggle(options.share!.label, draftSharing.get(anchor) ?? api.shareComments,
         "draft-share", (share) => draftSharing.set(anchor, share)));
     }
     if (!thread && draft && canAttachImage()) {
@@ -5118,8 +5119,10 @@ export function initComments(options: CommentsOptions): CommentsController {
           notify(reason instanceof Error ? reason.message : "The image could not be attached.");
         });
       });
-      form.append(attach, file);
+      footer.prepend(attach);
+      form.append(file);
     }
+    if (footer.childElementCount) form.append(footer);
     // Start the target's snapshot while the reviewer writes; the chunk shows it once captured.
     const shot = !thread && draft && !droppedSnapshots.has(draft) && snapshot(draft);
     if (shot) form.append(snapshotSlot(3, { anchor: draft!, page: "", id: "" }, shot));
