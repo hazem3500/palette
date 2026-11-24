@@ -109,8 +109,9 @@ beforeAll(async () => {
     other: { repo: "owner/site", origins: [origin] },
     photos: { repo: "owner/site", origins: [origin] },
     scopes: { repo: "owner/site", origins: [origin] },
-    // Its own project keeps the sharing test out of the "test" rate limits.
+    // Isolate these integration fixtures from the heavily used "test" rate limits.
     sharing: { repo: "owner/site", origins: [origin] },
+    attachments: { repo: "owner/site", origins: [origin] },
     strict: { repo: "owner/site", origins: [origin], allowGuestResolve: false },
     demo: { repo: "owner/site", origins: [origin], retainedCommentsPerUser: 3 },
     snapshots: {
@@ -2707,25 +2708,28 @@ describe("personal access tokens", () => {
   it("attributes a token's reply and allows its author to attach an image and react", async () => {
     const { body } = await create("owner-token");
     const token = body.token as string;
-    const { id: threadId } = await (await post(token, "test")).json();
+    const project = "attachments";
+    const thread = await post(token, project);
+    expect(thread.status).toBe(201);
+    const { id: threadId } = await thread.json();
     const reply = await request(`/threads/${threadId}/comments`, "POST", { body: "**Looks good**" },
-      token, "shared");
+      token, "shared", "owner/site", project);
     expect(reply.status).toBe(201);
     const { id: commentId } = await reply.json();
     const path = `/threads/${threadId}/comments/${commentId}`;
     const url = new URL(`${path}/image`, `http://localhost:${port}`);
-    url.search = new URLSearchParams({ project: "test", repo: "owner/site", branch: "shared" }).toString();
+    url.search = new URLSearchParams({ project, repo: "owner/site", branch: "shared" }).toString();
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kE9sAAAAASUVORK5CYII=", "base64");
     const added = await fetch(url, {
       method: "PUT", headers: { Origin: origin, Authorization: `Bearer ${token}`, "Content-Type": "image/png" }, body: png,
     });
     expect(added.status).toBe(201);
-    expect((await request(`${path}/reactions`, "POST", { emoji: "👍", active: true }, token, "shared")).status).toBe(200);
+    expect((await request(`${path}/reactions`, "POST", { emoji: "👍", active: true }, token, "shared", "owner/site", project)).status).toBe(200);
     expect((await fetch(url, { headers: { Origin: origin } })).status).toBe(401);
     const image = await fetch(url, { headers: { Origin: origin, Authorization: `Bearer ${token}` } });
     expect(image.headers.get("Content-Type")).toBe("image/png");
     expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
-    const { threads } = await (await request(`/threads?id=${threadId}`, "GET", undefined, token, "shared")).json();
+    const { threads } = await (await request(`/threads?id=${threadId}`, "GET", undefined, token, "shared", "owner/site", project)).json();
     expect(threads[0].comments[1]).toMatchObject({
       author: { id: "google:fixture" }, apiKeyName: "CI bot", body: "**Looks good**",
       image: expect.stringContaining(path + "/image"), reactions: { "👍": ["google:fixture"] },
@@ -2922,7 +2926,7 @@ describe("personal access tokens", () => {
     ).body;
     expect(limited.item.projects).toEqual(["other"]);
     expect((await post(limited.token, "other")).status).toBe(201);
-    const wrong = await post(limited.token, "test");
+    const wrong = await post(limited.token, "attachments");
     expect(wrong.status).toBe(403);
     expect((await wrong.json()).error).toContain("project");
     expect(
