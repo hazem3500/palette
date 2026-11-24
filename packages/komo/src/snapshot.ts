@@ -315,7 +315,7 @@ function backdrop(element: Element, view: Window) {
 }
 
 /** The element as an SVG image with every computed style inlined. */
-async function render(element: Element, redact: ((element: Element) => boolean) | undefined, region?: Crop) {
+async function render(element: Element, redact: ((element: Element) => boolean) | undefined, region?: Crop, freeze = false) {
   const page = element.ownerDocument;
   const view = page.defaultView!;
   const rect = element.getBoundingClientRect();
@@ -379,7 +379,7 @@ async function render(element: Element, redact: ((element: Element) => boolean) 
     } else {
       clone = original.cloneNode(false) as Element;
       cleanAttributes(clone);
-      for (const attribute of ["id", "class", "srcset", "sizes", "loading", "style"]) clone.removeAttribute(attribute);
+      for (const attribute of ["id", "class", "srcset", "sizes", "loading", "style", "popover"]) clone.removeAttribute(attribute);
     }
     if (typed(original)) {
       clone.removeAttribute("value");
@@ -418,7 +418,7 @@ async function render(element: Element, redact: ((element: Element) => boolean) 
   };
   try {
     // The page's paint is settled: fonts loaded, the element laid out.
-    await page.fonts?.ready;
+    if (!freeze) await page.fonts?.ready;
     const root = copy(element) as Element;
     const resolved = new Map(await Promise.all([...urls].map(async ([url, data]) => [url, await data] as const)));
     const swap = (css: string) =>
@@ -480,9 +480,9 @@ export async function imageDataUrl(image: CanvasImageSource, crop: Crop, limit: 
 }
 
 /** The selected region or the whole element as WebP. */
-export async function snapshotImage(element: Element, options: PaletteSnapshots = {}, region?: Crop): Promise<string> {
+export async function snapshotImage(element: Element, options: PaletteSnapshots = {}, region?: Crop, freeze = false): Promise<string> {
   const density = region ? 1 : element.ownerDocument.defaultView?.devicePixelRatio || 1;
-  const { image, width, height } = await render(element, options.redact, region);
+  const { image, width, height } = await render(element, options.redact, region, freeze);
   return imageDataUrl(image, { x: 0, y: 0, width, height }, options.maxBytes ?? IMAGE_BYTES, density);
 }
 
@@ -527,6 +527,7 @@ export async function captureSnapshot(
   options: PaletteSnapshots,
   htmlLimit = HTML_LIMIT,
   region?: Crop,
+  freeze = false,
 ): Promise<CapturedSnapshot | null> {
   if (!element?.isConnected || skipped(element)) return null;
   const result: CapturedSnapshot = {};
@@ -536,11 +537,11 @@ export async function captureSnapshot(
   if (options.html) result.html = html();
   if (options.image) {
     // Drawing walks every computed style; let the composer open first.
-    await new Promise((resolve) =>
+    if (!freeze) await new Promise((resolve) =>
       typeof requestIdleCallback === "function" ? requestIdleCallback(resolve, { timeout: 500 }) : setTimeout(resolve),
     );
     try {
-      result.image = await snapshotImage(element, options, region);
+      result.image = await snapshotImage(element, options, region, freeze);
     } catch (error) {
       result.note = error instanceof Skip ? error.reason : "failed";
       if (result.note === "cross-origin") result.html ??= html();
@@ -571,12 +572,13 @@ export function snapshotFor<Anchor extends object>(
   post?: (kind: "image" | "html" | "status", body: Blob) => Promise<unknown>,
   region?: Crop,
   attachment?: Promise<CapturedSnapshot | null>,
+  freeze = false,
 ): Promise<CapturedSnapshot | null> {
   let capture = attachment ?? captures.get(anchor);
   if (!capture) {
     const shot = { ...options, maxBytes: Math.min(options.maxBytes ?? IMAGE_BYTES, limits.maxImageBytes || Infinity) };
     capture = options.image || options.html
-      ? captureSnapshot(resolve(anchor), shot, Math.min(HTML_LIMIT, limits.maxHtmlBytes || Infinity), region).catch(() => ({ note: "failed" as const }))
+      ? captureSnapshot(resolve(anchor), shot, Math.min(HTML_LIMIT, limits.maxHtmlBytes || Infinity), region, freeze).catch(() => ({ note: "failed" as const }))
       : Promise.resolve(null);
     captures.set(anchor, capture);
   }

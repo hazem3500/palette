@@ -34,6 +34,7 @@ import { accentPicker } from "./lazy-accent-picker.js";
 import { applyAccent, DEFAULT_ACCENT } from "./accent.js";
 import { cardMotion } from "./card-motion.js";
 import { drawerPresence } from "./drawer-presence.js";
+import { reviewLayer } from "./review-layer.js";
 import { floatingDrag, constrain, type Placement } from "./floating-drag.js";
 import {
   EDGE_MARGIN,
@@ -83,6 +84,7 @@ import {
   commentAnchorTarget,
   anchorPass,
   resolveAnchor,
+  reviewOverlay,
   locateAnchor as measureAnchor,
 } from "./anchors.js";
 import {
@@ -534,7 +536,6 @@ export function initComments(options: CommentsOptions): CommentsController {
   let parkedDraft: { anchor: Anchor; text: string } | null = null;
   const recoveredDrafts: { anchor: Anchor; text: string }[] = [];
   let dialogKey: string | null = null;
-  // The open card whose anchor was last seen on the page.
   let attachedKey: string | null = null;
   const cardPlacements = new Map<string, Placement>();
   const cardFollow = cardMotion(() => positionNotice());
@@ -629,17 +630,21 @@ export function initComments(options: CommentsOptions): CommentsController {
    * uploads it once the thread exists.
    */
   const draftImages = new WeakMap<Anchor, Promise<import("./snapshot.js").CapturedSnapshot | null>>();
+  const draftOverlays = new WeakMap<Anchor, { target: Element; bounds: NonNullable<ReturnType<typeof locateAnchor>["component"]> }>();
+  let snapshotModule: Promise<typeof import("./snapshot.js")> | undefined;
+  const loadSnapshot = () => (snapshotModule ??= import("./snapshot.js"));
   const canAttachImage = () => !!snapshotLimits?.maxImageBytes && !!api.user &&
     (api.user.verified || snapshotLimits.guests);
   const snapshot = (anchor: Anchor, post?: (kind: string, body: Blob) => Promise<unknown>) => {
     const attachment = draftImages.get(anchor);
+    const overlay = draftOverlays.get(anchor)?.target;
     const settings = options.snapshots;
     const area = anchor.width > 0 && anchor.height > 0;
     const image = settings?.image ?? area;
     if (snapshotLimits && canAttachImage() && (attachment || image || settings?.html))
-      return import("./snapshot.js").then((module) => module.snapshotFor(
-        anchor, resolveAnchor, { ...settings, image }, snapshotLimits!, post,
-        area ? anchor : undefined, attachment,
+      return loadSnapshot().then((module) => module.snapshotFor(
+        anchor, overlay ? () => overlay : resolveAnchor, { ...settings, image }, snapshotLimits!, post,
+        area ? anchor : undefined, attachment, !!overlay,
       ), () => null);
   };
   // Saved snapshots (thumbnails, the not-found fallback, the viewer, the draft preview)
@@ -691,6 +696,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     position: "fixed",
     inset: "0",
     pointerEvents: "none",
+    margin: "0", padding: "0", border: "0", background: "transparent",
     zIndex: "2147483647",
     isolation: "isolate",
   });
@@ -811,6 +817,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     live,
   );
   document.body.append(host);
+  const syncReviewLayer = reviewLayer(host, abort.signal);
   // Modal libraries hide every body sibling from assistive tech; Palette stays
   // reachable. A capped rate yields to a library that keeps re-applying.
   let unhidden = 0,
@@ -2073,6 +2080,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     if (value) {
       revealComments();
       live.textContent = "Click an element or drag to mark an area.";
+      if (canAttachImage()) void loadSnapshot().catch(() => {});
     }
     if (expanded && !inFrame()) toggleExpanded(false);
     const restore = value ? (parkedDraft ?? recoveredDrafts.shift()) : null;
@@ -5324,11 +5332,11 @@ export function initComments(options: CommentsOptions): CommentsController {
     const accountScroll =
       dialogs.querySelector(".account-dialog")?.scrollTop ?? 0;
     const nextKey = account ? "account" : draft ? "draft" : selected;
-    if (nextKey !== dialogKey) attachedKey = null;
     const previousDialog = dialogs.firstElementChild as HTMLElement | null;
     const panel = threadPanel();
     const wasDocked = dialogs.classList.contains("thread-pane");
     const changing = dialogKey !== nextKey;
+    if (changing) attachedKey = null;
     const previousRect = previousDialog?.getBoundingClientRect();
     const previousReactions = new Map(
       [
@@ -6187,9 +6195,11 @@ export function initComments(options: CommentsOptions): CommentsController {
         : anchor
           ? (() => {
               const rect = locateAnchor(anchor);
-              // A detached comment opens centred rather than at stale coordinates,
-              // but one whose anchor leaves (a modal closing) closes with it.
-              if (!rect.attached) return attachedKey === dialogKey ? false : null;
+              if (!rect.attached) {
+                around = draft ? draftOverlays.get(draft)?.bounds : undefined;
+                if (!around) return attachedKey === dialogKey ? false : null;
+                return { x: around.left, y: around.top };
+              }
               attachedKey = dialogKey;
               around =
                 rect.width > 16 && rect.height > 16
@@ -6207,7 +6217,6 @@ export function initComments(options: CommentsOptions): CommentsController {
             })()
           : null;
     if (pin === false) {
-      // Unsent text survives: replies stay keyed by thread, drafts park.
       if (draft && draftText.trim()) parkedDraft = { anchor: draft, text: draftText };
       return dismiss();
     }
@@ -6723,8 +6732,32 @@ export function initComments(options: CommentsOptions): CommentsController {
     revealComments();
     draftBeside = beside;
     hidePreview();
-    element = commentAnchorTarget(element, framedRoot(), options.anchorTarget);
-    draft = captureAnchor(element, start, end, options.source);
+    let overlay = element.closest(reviewOverlay);
+    const area = start.x !== end.x || start.y !== end.y;
+    if (area && !overlay) {
+      const corners = [end, { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }];
+      for (const point of corners) {
+        overlay = siteElementAt(point.x, point.y)?.closest(reviewOverlay) ?? null;
+        if (overlay) break;
+      }
+    }
+    if (area && overlay) {
+      const bounds = screenRect(overlay);
+      const clamp = (point: typeof start) => ({
+        x: Math.max(bounds.left, Math.min(point.x, bounds.right)),
+        y: Math.max(bounds.top, Math.min(point.y, bounds.bottom)),
+      });
+      start = clamp(start);
+      end = clamp(end);
+      element = overlay;
+    } else {
+      element = commentAnchorTarget(element, framedRoot(), options.anchorTarget);
+    }
+    const anchor = draft = captureAnchor(element, start, end, options.source, !!overlay && area);
+    if (overlay) draftOverlays.set(anchor, { target: element, bounds: {
+      left: Math.min(start.x, end.x), top: Math.min(start.y, end.y),
+      right: Math.max(start.x, end.x), bottom: Math.max(start.y, end.y),
+    } });
     // The viewport iframe's anchor is already in its own document coordinates.
     if (framed && !viewportShown) {
       // Store document coordinates, not the scaled frame's.
@@ -6740,11 +6773,15 @@ export function initComments(options: CommentsOptions): CommentsController {
     editing = null;
     error = "";
     render();
-    // A thread pane sliding out of the sidebar still holds a reply box.
-    dialogs
-      .querySelector<HTMLTextAreaElement>('[data-focus-key="body"]')
-      ?.focus({ preventScroll: true });
-    positionDialog();
+    const focus = () => {
+      if (draft !== anchor) return;
+      // A thread pane sliding out of the sidebar still holds a reply box.
+      dialogs.querySelector<HTMLTextAreaElement>('[data-focus-key="body"]')?.focus({ preventScroll: true });
+      positionDialog();
+    };
+    // Snapshot starts in the composer. Let it copy the overlay before focus can dismiss it.
+    if (overlay && canAttachImage()) void loadSnapshot().then(focus, focus);
+    else focus();
   }
   catcher.addEventListener("pointerup", (event) => {
     if (!drag || drag.pointerId !== event.pointerId) return;
@@ -7008,6 +7045,7 @@ export function initComments(options: CommentsOptions): CommentsController {
   observer.observe(surface);
   let mutationTimer = 0;
   const mutations = new MutationObserver((records) => {
+    if (!host.isConnected) syncReviewLayer();
     if (records.some((record) => record.target === document.body)) framePortals();
     // Background host churn needs one refresh per burst, not per animation frame.
     if (draft || selected || mode || activeNotice) return geometry();
@@ -7233,11 +7271,11 @@ export function initComments(options: CommentsOptions): CommentsController {
         { passive: true, signal: abort.signal },
       );
     // Moving focus into Palette fires focusout on the page element, which focus
-    // traps answer by refocusing. Stop it for document listeners added later.
+    // traps answer by refocusing. Stop it before their document bubble listeners.
     document.addEventListener(
       "focusout",
       (event) => event.relatedTarget === host && event.stopImmediatePropagation(),
-      { signal: abort.signal },
+      { capture: true, signal: abort.signal },
     );
   }
   document.addEventListener(
@@ -7253,6 +7291,7 @@ export function initComments(options: CommentsOptions): CommentsController {
           subtree: true,
           characterData: true,
         });
+        syncReviewLayer();
         framePortals();
         geometry();
       }
