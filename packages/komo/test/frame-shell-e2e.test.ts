@@ -154,13 +154,23 @@ describe.skipIf(!chrome)("Frame single-copy shell", () => {
     await page.close();
   });
 
-  it("stays on the page at the window's own size, and reloads into the shell only for another size", async () => {
+  it("stays on the page when dragging the frame and enters the shell when choosing a preset", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await load(page, "?windowsize");
     await page.waitForFunction(() => !!(window as any).palette);
     await page.keyboard.press("l");
     await page.locator(".frame-size-trigger").waitFor();
     await page.waitForTimeout(300);
+    expect(await state(page)).toMatchObject({ shell: false, mounts: ["top"], appOnTop: true });
+    expect(page.url()).toBe(`${origin}/?windowsize`);
+    const width = page.getByRole("slider", { name: "Frame width", exact: true });
+    const originalWidth = Number(await width.getAttribute("aria-valuenow"));
+    const handle = (await width.boundingBox())!;
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handle.x - 80, handle.y + handle.height / 2, { steps: 4 });
+    await page.mouse.up();
+    expect(Number(await width.getAttribute("aria-valuenow"))).toBeLessThan(originalWidth);
     expect(await state(page)).toMatchObject({ shell: false, mounts: ["top"], appOnTop: true });
     expect(page.url()).toBe(`${origin}/?windowsize`);
     await page.locator(".frame-size-trigger").click();

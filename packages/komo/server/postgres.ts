@@ -98,6 +98,8 @@ export function postgresDatabase(connectionString: string, pg: Pg) {
           "008_webhook_outbox.sql",
           "009_user_share_comments.sql",
           "010_project_bot_tokens.sql",
+          "011_comment_api_key_name.sql",
+          "012_comment_images.sql",
         ];
         if (
           versions.rows.length > 1 ||

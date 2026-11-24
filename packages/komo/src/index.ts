@@ -1014,7 +1014,7 @@ export function initComments(options: CommentsOptions): CommentsController {
       // Re-layout only for a remembered size; the default keeps Frame's entrance motion.
       if (frameControls.sized) {
         appliedViewport = "";
-        scalePage();
+        scalePage(true);
       } else frameControls.update(frameArea, htmlZoom());
     });
   }
@@ -2266,9 +2266,10 @@ export function initComments(options: CommentsOptions): CommentsController {
       ? { ...box, scale: 1, pan: false }
       : (frameControls?.view(box, windowSize) ?? frameView(box, windowSize, false));
     // At the window's own size the page in place already matches a real viewport, so the
-    // single-copy shell, which reloads the tab both in and out, waits for another size.
+    // single-copy shell waits for Frame to open at a saved size or for an explicit menu choice.
     const reloads = shellWanted && !shell;
-    if (useFrame && !scaled && wantsViewport() && (!reloads || (allowShell && !frameControls?.fitsWindow))) {
+    const canEnterShell = allowShell && frameControls && !frameControls.fitsWindow;
+    if (useFrame && !scaled && wantsViewport() && (!reloads || canEnterShell)) {
       if (reloads) enterShell();
       else openViewport();
     } else if (shell && shellReady) return leaveShell();
@@ -2800,7 +2801,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     toolbarPlacement = value ? undefined : savedToolbarPlacement;
     dockCenter = undefined;
     hidden = false;
-    scalePage();
+    scalePage(opening);
     render();
     dockMotion?.stop();
     toolbar.style.translate = "0px 0px";
