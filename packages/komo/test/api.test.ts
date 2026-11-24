@@ -1820,8 +1820,19 @@ describe("owner management and private projects", () => {
     expect(issued.status, JSON.stringify(bot)).toBe(201);
     const created = await call("/threads", "POST", { page: "/bot-test", anchor, body: "#toki help" });
     expect(created.status).toBe(201);
-    const { id } = await created.json();
+    const { id, commentId } = await created.json();
     expect((await call(`/threads/${id}/comments`, "POST", { body: "On it" }, bot.token)).status).toBe(201);
+    const reactions = `/threads/${id}/comments/${commentId}/reactions`;
+    expect((await call(reactions, "POST", { emoji: "👍", active: true })).status).toBe(200);
+    for (const emoji of ["🔨", "❔", "✅", "✅"]) {
+      expect((await call(reactions, "POST", { emoji, active: true }, bot.token)).status).toBe(200);
+      const { threads } = await (await call(`/threads?id=${id}`, "GET", undefined, bot.token)).json();
+      const original = threads[0].comments[0];
+      expect(original.reactions).toEqual({
+        "👍": [original.author.id],
+        [emoji]: [bot.userId],
+      });
+    }
     const listing = await (await call(`/threads?id=${id}`, "GET", undefined, bot.token)).json();
     const reply = listing.threads.find((thread: Thread) => thread.id === id).comments.at(-1);
     expect(reply.author.id).toBe(bot.userId);
