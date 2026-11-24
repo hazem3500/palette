@@ -101,8 +101,9 @@ function nearbyFor(element: Element): string {
     ? textFor(parent)
     : "";
 }
+export const reviewOverlay = "dialog,[role=dialog],[role=alertdialog],[popover],[data-radix-popper-content-wrapper],[role=menu],[role=listbox]";
 const overlayBoundary = (element: Element) =>
-  element.matches("dialog,[role=dialog],[role=alertdialog],[popover]") ||
+  element.matches(reviewOverlay) ||
   getComputedStyle(element).position === "fixed";
 function contextFor(element: Element): NonNullable<Anchor["context"]> {
   const document = element.ownerDocument;
@@ -213,6 +214,7 @@ export function captureAnchor(
   start: { x: number; y: number },
   end: { x: number; y: number },
   source?: string | ((element: Element) => string | undefined),
+  withinTarget = false,
 ): Anchor {
   let target = element;
   const document = element.ownerDocument, view = document.defaultView ?? window;
@@ -222,7 +224,7 @@ export function captureAnchor(
     top = Math.min(start.y, end.y);
   const right = Math.max(start.x, end.x),
     bottom = Math.max(start.y, end.y);
-  while (target.parentElement && target !== document.body) {
+  while (!withinTarget && target.parentElement && target !== document.body) {
     const r = target.getBoundingClientRect();
     if (
       left >= r.left &&

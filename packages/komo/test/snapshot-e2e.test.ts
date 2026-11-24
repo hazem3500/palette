@@ -297,6 +297,61 @@ describe.skipIf(!chrome)("comment snapshots", () => {
     await page.close();
   }, 60_000);
 
+  it.each(["portal", "transient", "native"] as const)("captures visible %s content and keeps the draft usable", async (kind) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    try {
+      await mockApi(page);
+      const config = page.waitForResponse(response => new URL(response.url()).pathname === "/api/config");
+      await open(page);
+      await config;
+      await page.evaluate((kind) => {
+        if (kind === "portal") {
+          const scrim = document.createElement("div");
+          scrim.style.cssText = "position:fixed;inset:0;background:#0007";
+          document.body.append(scrim);
+        }
+        const overlay = document.createElement(kind === "native" ? "dialog" : "div");
+        overlay.id = "host-overlay";
+        overlay.setAttribute("role", kind === "transient" ? "menu" : "dialog");
+        overlay.style.cssText = "position:fixed;inset:auto;left:400px;top:180px;margin:0;padding:20px;border:0;width:300px;height:160px;background:rgb(35,70,92);color:white";
+        const button = document.createElement("button");
+        button.textContent = "Host overlay";
+        overlay.append(button);
+        document.body.append(overlay);
+        if (overlay instanceof HTMLDialogElement) overlay.showModal();
+        button.focus();
+        if (kind === "transient")
+          window.addEventListener("focusout", event => {
+            if (event.target === button) overlay.remove();
+          }, { capture: true, once: true });
+      }, kind);
+      if (kind === "native")
+        await expect.poll(() => page.locator("#host-overlay [data-branch-comments]").count()).toBe(1);
+      await page.keyboard.press("c");
+      await page.mouse.move(kind === "portal" ? 380 : 404, 184);
+      await page.mouse.down();
+      await page.mouse.move(620, 280, { steps: 4 });
+      await page.mouse.up();
+      const draft = page.getByPlaceholder("Add a comment…");
+      await expect.poll(() => draft.evaluate(input => input.getRootNode() instanceof ShadowRoot &&
+        (input.getRootNode() as ShadowRoot).activeElement === input)).toBe(true);
+      await page.keyboard.type("Review this overlay");
+      expect(await draft.inputValue()).toBe("Review this overlay");
+      const thumbnail = page.locator(".palette-snapshot-draft img");
+      await thumbnail.waitFor();
+      const source = await thumbnail.getAttribute("src");
+      const pixels = await inspect(page, source!, { overlay: [35, 70, 92] });
+      expect(pixels.counts.overlay).toBeGreaterThan(pixels.width * pixels.height / 2);
+      if (kind === "transient") expect(await page.locator("#host-overlay").count()).toBe(0);
+      if (kind === "native") {
+        await page.keyboard.press("Escape");
+        expect(await page.locator("#host-overlay").evaluate(element => (element as HTMLDialogElement).open)).toBe(true);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   it("still posts the comment when the upload fails", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     const api = await mockApi(page, true);
