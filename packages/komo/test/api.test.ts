@@ -2693,6 +2693,36 @@ describe("personal access tokens", () => {
     );
   }, 120000);
 
+  it("attributes a token's reply and allows its author to attach an image and react", async () => {
+    const { body } = await create("owner-token");
+    const token = body.token as string;
+    const { id: threadId } = await (await post(token, "test")).json();
+    const reply = await request(`/threads/${threadId}/comments`, "POST", { body: "**Looks good**" },
+      token, "shared");
+    expect(reply.status).toBe(201);
+    const { id: commentId } = await reply.json();
+    const path = `/threads/${threadId}/comments/${commentId}`;
+    const url = new URL(`${path}/image`, `http://localhost:${port}`);
+    url.search = new URLSearchParams({ project: "test", repo: "owner/site", branch: "shared" }).toString();
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kE9sAAAAASUVORK5CYII=", "base64");
+    const added = await fetch(url, {
+      method: "PUT", headers: { Origin: origin, Authorization: `Bearer ${token}`, "Content-Type": "image/png" }, body: png,
+    });
+    expect(added.status).toBe(201);
+    expect((await request(`${path}/reactions`, "POST", { emoji: "👍", active: true }, token, "shared")).status).toBe(200);
+    expect((await fetch(url, { headers: { Origin: origin } })).status).toBe(401);
+    const image = await fetch(url, { headers: { Origin: origin, Authorization: `Bearer ${token}` } });
+    expect(image.headers.get("Content-Type")).toBe("image/png");
+    expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
+    const { threads } = await (await request(`/threads?id=${threadId}`, "GET", undefined, token, "shared")).json();
+    expect(threads[0].comments[1]).toMatchObject({
+      author: { id: "google:fixture" }, apiKeyName: "CI bot", body: "**Looks good**",
+      image: expect.stringContaining(path + "/image"), reactions: { "👍": ["google:fixture"] },
+    });
+    expect(JSON.stringify(threads)).not.toContain(token);
+    expect((await account(`/account/tokens/${body.item.id}`, "DELETE", "owner-token")).status).toBe(200);
+  });
+
   it("serves the account page with a locked-down CSP", async () => {
     const response = await fetch(`http://localhost:${port}/account`);
     expect(response.status).toBe(200);

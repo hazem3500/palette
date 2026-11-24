@@ -437,35 +437,61 @@ const encode = (canvas: HTMLCanvasElement, quality: number) =>
     }
   });
 
-/** The element plus padding as WebP, at most 1200px wide and `maxBytes` in size. */
-export async function snapshotImage(element: Element, options: PaletteSnapshots = {}): Promise<string> {
-  const limit = options.maxBytes ?? IMAGE_BYTES;
-  const view = element.ownerDocument.defaultView ?? window;
-  const width = (element as HTMLElement).offsetWidth || element.getBoundingClientRect().width;
-  let scale = Math.min(view.devicePixelRatio || 1, 2, MAX_WIDTH / (width + PADDING * 2));
-  const drawn = await render(element, options.redact, scale);
+type Crop = { x: number; y: number; width: number; height: number };
+
+export async function imageDataUrl(image: CanvasImageSource, crop: Crop, limit: number, density = 1): Promise<string> {
+  let scale = Math.min(density, 2, MAX_WIDTH / crop.width);
   const canvas = document.createElement("canvas");
   let quality = 0.8;
-  for (let attempt = 0; attempt < 12 && drawn.width * scale >= 48; attempt++) {
-    canvas.width = Math.max(1, Math.round(drawn.width * scale));
-    canvas.height = Math.max(1, Math.round(drawn.height * scale));
+  for (let attempt = 0; attempt < 12; attempt++) {
+    canvas.width = Math.max(1, Math.round(crop.width * scale));
+    canvas.height = Math.max(1, Math.round(crop.height * scale));
     const context = canvas.getContext("2d");
     if (!context) throw new Skip("unsupported");
-    context.drawImage(drawn.image, 0, 0, canvas.width, canvas.height);
+    context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
     let blob: Blob | null;
     try {
       blob = await encode(canvas, quality);
     } catch {
-      // Something in the clone still came from another origin.
       throw new Skip("cross-origin");
     }
     if (!blob || blob.type !== "image/webp") throw new Skip("unsupported");
     if (blob.size <= limit) return readBlob(blob);
-    // Lower the quality first (0.8, 0.65, 0.5), then the size, by about what is over.
     if (quality > 0.5) quality = Math.round((quality - 0.15) * 100) / 100;
     else scale *= Math.min(0.85, Math.max(0.3, Math.sqrt(limit / blob.size) * 0.95));
   }
   throw new Skip("too-large");
+}
+
+/** The selected region or the whole element as WebP. */
+export async function snapshotImage(element: Element, options: PaletteSnapshots = {}, region?: Crop): Promise<string> {
+  const view = element.ownerDocument.defaultView ?? window;
+  const width = (element as HTMLElement).offsetWidth || element.getBoundingClientRect().width;
+  const density = view.devicePixelRatio || 1;
+  const scale = Math.min(density, 2, MAX_WIDTH / (width + PADDING * 2));
+  const drawn = await render(element, options.redact, scale);
+  const w = drawn.width - PADDING * 2, h = drawn.height - PADDING * 2;
+  const layoutHeight = (element as HTMLElement).offsetHeight || element.getBoundingClientRect().height;
+  const crop = region ? {
+    x: PADDING + region.x * w,
+    y: PADDING + region.y * layoutHeight,
+    width: region.width * w,
+    height: Math.min(region.height * layoutHeight, h - region.y * layoutHeight),
+  } : { x: 0, y: 0, width: drawn.width, height: drawn.height };
+  if (crop.width <= 0 || crop.height <= 0) throw new Skip("too-large");
+  return imageDataUrl(drawn.image, crop, options.maxBytes ?? IMAGE_BYTES, density);
+}
+
+export async function imageAttachment(file: File, limit: number): Promise<CapturedSnapshot> {
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 20 * 1024 * 1024)
+    throw new Error("Choose a PNG, JPEG or WebP image under 20 MB.");
+  const image = await createImageBitmap(file);
+  try {
+    if (image.width * image.height > 40_000_000) throw new Error("Choose an image with fewer than 40 megapixels.");
+    return { image: await imageDataUrl(image, { x: 0, y: 0, width: image.width, height: image.height }, limit) };
+  } finally {
+    image.close();
+  }
 }
 
 /** The server's snapshot support, from `/config`. */
@@ -496,6 +522,7 @@ export async function captureSnapshot(
   element: Element | null,
   options: PaletteSnapshots,
   htmlLimit = HTML_LIMIT,
+  region?: Crop,
 ): Promise<CapturedSnapshot | null> {
   if (!element?.isConnected || skipped(element)) return null;
   const result: CapturedSnapshot = {};
@@ -509,7 +536,7 @@ export async function captureSnapshot(
       typeof requestIdleCallback === "function" ? requestIdleCallback(resolve, { timeout: 500 }) : setTimeout(resolve),
     );
     try {
-      result.image = await snapshotImage(element, options);
+      result.image = await snapshotImage(element, options, region);
     } catch (error) {
       result.note = error instanceof Skip ? error.reason : "failed";
       if (result.note === "cross-origin") result.html ??= html();
@@ -538,12 +565,14 @@ export function snapshotFor<Anchor extends object>(
   options: PaletteSnapshots,
   limits: SnapshotLimits,
   post?: (kind: "image" | "html" | "status", body: Blob) => Promise<unknown>,
+  region?: Crop,
+  attachment?: Promise<CapturedSnapshot | null>,
 ): Promise<CapturedSnapshot | null> {
-  let capture = captures.get(anchor);
+  let capture = attachment ?? captures.get(anchor);
   if (!capture) {
     const shot = { ...options, maxBytes: Math.min(options.maxBytes ?? IMAGE_BYTES, limits.maxImageBytes || Infinity) };
     capture = options.image || options.html
-      ? captureSnapshot(resolve(anchor), shot, Math.min(HTML_LIMIT, limits.maxHtmlBytes || Infinity)).catch(() => ({ note: "failed" as const }))
+      ? captureSnapshot(resolve(anchor), shot, Math.min(HTML_LIMIT, limits.maxHtmlBytes || Infinity), region).catch(() => ({ note: "failed" as const }))
       : Promise.resolve(null);
     captures.set(anchor, capture);
   }

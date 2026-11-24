@@ -14,13 +14,17 @@ const env = (overrides = {}) => ({
 }) as unknown as Env;
 const request = (path: string, method = "GET") => new Request(`https://example.test${path}`, { method });
 
-it("allows a project bot to read context and post replies as itself", async () => {
-  for (const path of ["/threads", "/threads/t/snapshot", "/threads/t/snapshot/image", "/me", "/config"])
+it("allows a project bot to read context, reply, attach and react as itself", async () => {
+  for (const path of ["/threads", "/threads/t/snapshot", "/threads/t/snapshot/image", "/threads/t/comments/c/image", "/me", "/config"])
     expect((await authenticateBotToken(env(), token, "fixture", "read", request(path))).id).toBe(row.id);
-  expect((await authenticateBotToken(env(), token, "fixture", "write", request("/threads/t/comments", "POST"))).name).toBe("Toki");
+  for (const [path, method] of [
+    ["/threads/t/comments", "POST"],
+    ["/threads/t/comments/c/reactions", "POST"],
+    ["/threads/t/comments/c/image", "PUT"],
+  ]) expect((await authenticateBotToken(env(), token, "fixture", "write", request(path, method))).name).toBe("Toki");
 });
 it("rejects administration, edits, new threads and missing route grants", async () => {
-  for (const [path, method] of [["/project", "GET"], ["/threads", "POST"], ["/threads/t", "PATCH"], ["/threads/t/comments/c", "DELETE"]])
+  for (const [path, method] of [["/project", "GET"], ["/threads", "POST"], ["/threads/t", "PATCH"], ["/threads/t/comments/c", "DELETE"], ["/threads/t/comments/c/image", "DELETE"]])
     await expect(authenticateBotToken(env(), token, "fixture", "write", request(path, method))).rejects.toThrow();
   await expect(authenticateBotToken(env(), token, "fixture", undefined, request("/threads"))).rejects.toThrow();
 });

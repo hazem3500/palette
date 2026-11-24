@@ -71,11 +71,13 @@ async function compose(config: CommentsOptions = options) {
   return { shadow, toggle, send };
 }
 
-it.each([false, true])("posts the account default (%s) with no checkbox in the comment box", async (saved) => {
+it.each([false, true])("lets each comment override the account default (%s)", async (saved) => {
   shareComments = saved;
   const { toggle, send } = await compose();
-  expect(toggle()).toBeNull();
-  expect(await send()).toMatchObject({ share: saved });
+  expect(toggle()?.checked).toBe(saved);
+  toggle()!.click();
+  expect(await send()).toMatchObject({ share: !saved });
+  expect(requests.some(({ path }) => path === "/me/settings")).toBe(false);
 });
 
 it("saves the account default from the Account panel", async () => {

@@ -44,7 +44,7 @@ const lists = new WeakMap<TokenAdapter, Map<string, Promise<DesignToken[]>>>();
 const reported = new WeakMap<TokenAdapter, Map<string, Promise<DesignToken[]>> | undefined>();
 let showingBefore = false;
 
-function removeCustom(element: Element, property: string) {
+export function clearCustomTokenOverride(element: Element, property: string) {
   const properties = customs.get(element);
   properties?.delete(property);
   if (!properties?.size) customs.delete(element);
@@ -125,7 +125,7 @@ export function customTokenOverride(element: Element, property: string): { prior
   properties.add(property);
   // Undo takes the mark back too, so an undone edit of an off-token field leaves no change behind.
   return { priority: "important", ...(!previous ? { undo: () => {
-    removeCustom(element, property);
+    clearCustomTokenOverride(element, property);
     if (wasToken && !showingBefore) { showTokenSwapsBefore(true); showTokenSwapsBefore(false); }
   } } : {}) };
 }
@@ -334,7 +334,7 @@ export function swapToken(
   const inline = isDesignTarget(element) ? inlineStyleSnapshot(element, property) : undefined;
   const customBefore = customs.get(element)?.has(property) ?? false;
   const undo = previewToken(adapter, element, property, token);
-  removeCustom(element, property);
+  clearCustomTokenOverride(element, property);
   stack.push({
     adapter,
     property,
@@ -354,7 +354,7 @@ export function undoTokenSwap(element: Element): void {
     let properties = customs.get(element);
     if (!properties) customs.set(element, properties = new Set());
     properties.add(swap.property);
-  } else if (swap) removeCustom(element, swap.property);
+  } else if (swap) clearCustomTokenOverride(element, swap.property);
   if (stack && !stack.length) swaps.delete(element);
 }
 

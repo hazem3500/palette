@@ -39,6 +39,10 @@ export interface Comment {
   id: string;
   body: string;
   author: Identity;
+  /** Display name of the personal access key that posted this comment. */
+  apiKeyName?: string;
+  /** Authenticated URL for an image the author attached. */
+  image?: string;
   createdAt: number;
   editedAt: number | null;
   reactions: Record<string, string[]>;

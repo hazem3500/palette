@@ -18,6 +18,7 @@ export interface SnapshotContext {
   origin(): string;
   /** Drafts whose capture is left out when they post. */
   dropped: WeakSet<Thread["anchor"]>;
+  annotate?(anchor: Thread["anchor"], shot: Pending): void;
   /** Opens a page through Palette's navigation (the host router when there is one). */
   go(url: URL): void;
   notify(text: string, action?: { label: string; run: () => void }): void;
@@ -51,6 +52,9 @@ const css = `.palette-snapshot{display:block;width:fit-content;margin-top:8px;pa
 .palette-snapshot-viewer::backdrop{background:rgb(0 0 0/40%);pointer-events:auto}
 .palette-snapshot-viewer header{display:flex;align-items:center;gap:8px}
 .palette-snapshot-viewer h2{flex:1;margin:0;padding-left:4px;font-size:13px;font-weight:600}
+.palette-snapshot-viewer .secondary{background:#ffffff14;color:inherit}
+.palette-snapshot-viewer .primary{background:#e6dcfb;color:#242424}
+.palette-snapshot-viewer .row{flex-wrap:wrap;justify-content:flex-end}
 .palette-snapshot-viewer .icon{width:28px;height:28px;border-radius:8px;color:#bbb}
 .palette-snapshot-viewer .icon:hover{background:#ffffff14;color:#eee}
 .palette-snapshot-viewer .icon:focus-visible{outline:2px solid var(--accent,#bda6ef);outline-offset:-2px}
@@ -392,6 +396,8 @@ function draft(shot: Pending, anchor: Thread["anchor"], context: SnapshotContext
     row.closest("form")?.querySelector("textarea")?.focus();
     row.remove();
   }, "icon", "trash");
+  if (shot.image && context.annotate)
+    row.append(button("Annotate image", () => context.annotate?.(anchor, shot), "secondary"));
   row.append(drop);
   return row;
 }
@@ -409,6 +415,11 @@ function route(thread: Snapshotted, context: SnapshotContext) {
   const line = el("p", "", "Left on ");
   line.append(link);
   return line;
+}
+
+export function mountCommentImage(slot: HTMLElement, context: SnapshotContext, url: string, anchor: Thread["anchor"]) {
+  style(context.root);
+  place(slot, thumbnail(url, { anchor }, context), context.root);
 }
 
 /**

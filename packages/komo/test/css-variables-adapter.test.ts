@@ -10,7 +10,7 @@ const css = `
     --text-lg: 1.125rem; --font-sans: ui-sans-serif, system-ui; --font-weight-bold: 700;
     --tw-ring: 0 0 #0000; --shadow-x: none; --opaque: 5;
   } }
-  .card { padding: var(--spacing-card); background: var(--color-brand); border-radius: 4px; }
+  .card { height: var(--spacing-card); padding: var(--spacing-card); background: var(--color-brand); border-radius: 4px; }
   #hero .card { border-radius: var(--radius-lg); }
   .plain { color: #123456; }
   .card.warn { background-color: var(--color-ink); }
@@ -54,6 +54,7 @@ describe("discoverCssTokens", () => {
     const [card, warn, plain] = Array.from(document.querySelectorAll("p"));
     const usage = await adapter.resolve(card);
     expect(usage.padding).toEqual({ path: "spacing.card" });
+    expect(usage.height).toEqual({ path: "spacing.card" });
     expect(usage["background-color"]).toEqual({ path: "color.brand" });
     // #hero .card out-ranks .card even though .card has a later declaration order.
     expect(usage["border-radius"]).toEqual({ path: "radius.lg" });

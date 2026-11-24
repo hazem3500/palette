@@ -38,7 +38,7 @@ interface Found {
   channels?: string;
 }
 
-const spacing = ["padding", "margin", "gap"];
+const spacing = ["padding", "margin", "gap", "width", "height"];
 const kinds: Record<string, [DesignTokenType, string[], string]> = {
   color: ["color", ["color", "background-color", "border-color"], "Color"],
   spacing: ["dimension", spacing, "Spacing"],

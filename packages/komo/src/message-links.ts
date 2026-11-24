@@ -74,3 +74,37 @@ function trimUrlPunctuation(value: string): { url: string; trailing: string } {
   }
   return { url: value.slice(0, end), trailing: value.slice(end) };
 }
+
+/** Render a small Markdown subset with DOM nodes, including code without linkifying it. */
+export function appendRichComment(element: HTMLElement, text: string): void {
+  const inline = (value: string) => {
+    const pattern = /\x60([^\x60\n]+)\x60|\*\*([^*\n]+)\*\*|(?<![\w*])\*([^*\n]+)\*(?![\w*])|\[([^\]\n]+)\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>]+/gi;
+    let offset = 0;
+    for (const match of value.matchAll(pattern)) {
+      const index = match.index!;
+      element.append(document.createTextNode(value.slice(offset, index)));
+      const [token, code, strong, emphasis] = match;
+      if (code || strong || emphasis) {
+        const styled = document.createElement(code ? "code" : strong ? "strong" : "em");
+        if (code) styled.textContent = code;
+        else appendMessageLinks(styled, strong ?? emphasis);
+        element.append(styled);
+      } else appendMessageLinks(element, token);
+      offset = index + token.length;
+    }
+    element.append(document.createTextNode(value.slice(offset)));
+  };
+
+  const fences = /^\x60{3}[\w-]*[ \t]*\r?\n([\s\S]*?)^\x60{3}[ \t]*$/gm;
+  let offset = 0;
+  for (const match of text.matchAll(fences)) {
+    inline(text.slice(offset, match.index));
+    const block = document.createElement("pre");
+    const code = document.createElement("code");
+    code.textContent = match[1].replace(/\r?\n$/, "");
+    block.append(code);
+    element.append(block);
+    offset = match.index! + match[0].length;
+  }
+  inline(text.slice(offset));
+}

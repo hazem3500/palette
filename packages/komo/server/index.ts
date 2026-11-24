@@ -95,6 +95,7 @@ type CommentRow = {
   verified: number;
   created_at: number;
   edited_at: number | null;
+  api_key_name?: string | null;
 };
 const identity = (row: UserRow): Identity => ({
   id: row.id,
@@ -306,7 +307,7 @@ async function authenticate(
   env: Env,
   project: string,
   access?: PatAccess
-): Promise<Identity> {
+): Promise<Identity & { apiKeyName?: string }> {
   const bearer = request.headers
     .get("Authorization")
     ?.match(/^Bearer (.{1,200})$/)?.[1];
@@ -319,9 +320,8 @@ async function authenticate(
       403,
       "Access tokens are off behind the sign-in proxy. Use /auth/proxy/session."
     );
-    return identity(
-      await authenticateToken(env, bearer, project, access, request)
-    );
+    const actor = await authenticateToken(env, bearer, project, access, request);
+    return { ...identity(actor), apiKeyName: actor.tokenName };
   }
   const now = Date.now();
   let row: UserRow | null;
@@ -1017,7 +1017,7 @@ async function route(
     "Unknown management route."
   );
   check(
-    ["GET", "POST", "PATCH", "DELETE"].includes(request.method),
+    ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(request.method),
     405,
     "Method not allowed."
   );
@@ -1201,6 +1201,7 @@ async function route(
       // Element snapshots are opt-in on the client; guests need project consent.
       // Clients may send `share` on new threads and edit `/me/settings`.
       share: true,
+      commentImages: true,
       snapshots: {
         readiness: true,
         guests: auth.allowGuests && config.allowGuestSnapshots === true,
@@ -1520,6 +1521,15 @@ async function route(
         `${url.origin}${env.PALETTE_PUBLIC_PATH ?? ""}/threads/${item.thread_id}/snapshot/${item.kind}?${scope}`;
       snapshotsByThread.set(item.thread_id, group);
     }
+    const imagesByComment = new Map<string, number>();
+    try {
+      const images = await env.DB.prepare(
+        `SELECT i.comment_id,i.created_at FROM comment_images i JOIN comments c ON c.id=i.comment_id WHERE c.thread_id IN (${placeholders})`
+      ).bind(...ids).all<{ comment_id: string; created_at: number }>();
+      for (const image of images.results) imagesByComment.set(image.comment_id, image.created_at);
+    } catch (error) {
+      if (!(error instanceof Error) || !/no such table: comment_images|relation "comment_images" does not exist/.test(error.message)) throw error;
+    }
     const commentsByThread = new Map<string, CommentRow[]>();
     for (const comment of comments.results) {
       const group = commentsByThread.get(comment.thread_id) ?? [];
@@ -1562,6 +1572,10 @@ async function route(
           avatarUrl: c.avatar_url || undefined,
           accentColor: c.accent_color || undefined,
         },
+        ...(c.api_key_name ? { apiKeyName: c.api_key_name } : {}),
+        ...(imagesByComment.has(c.id) ? {
+          image: `${url.origin}${env.PALETTE_PUBLIC_PATH ?? ""}/threads/${c.thread_id}/comments/${c.id}/image?${new URLSearchParams({ project, repo, branch, v: String(imagesByComment.get(c.id)) })}`,
+        } : {}),
         createdAt: c.created_at,
         editedAt: c.edited_at,
         reactions: reactionsByComment.get(c.id) ?? {},
@@ -1592,7 +1606,7 @@ async function route(
       revision,
     });
   }
-  const user = await authenticate(request, env, project, access);
+  const { apiKeyName, ...user } = await authenticate(request, env, project, access);
   await limit(env, `${project}:session:${user.id}`, 60);
   const now = Date.now();
   if (url.pathname === "/threads" && request.method === "POST") {
@@ -1621,9 +1635,13 @@ async function route(
         : env.DB.prepare(
             "INSERT INTO threads(id,project,repo,branch,page,anchor,tags,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)"
           ).bind(id, project, repo, branch, page, JSON.stringify(anchor), JSON.stringify(tags), now, now),
-      env.DB.prepare(
-        "INSERT INTO comments(id,thread_id,user_id,body,created_at) VALUES(?,?,?,?,?)"
-      ).bind(firstCommentId, id, user.id, text, now),
+      apiKeyName
+        ? env.DB.prepare(
+            "INSERT INTO comments(id,thread_id,user_id,body,created_at,api_key_name) VALUES(?,?,?,?,?,?)"
+          ).bind(firstCommentId, id, user.id, text, now, apiKeyName)
+        : env.DB.prepare(
+            "INSERT INTO comments(id,thread_id,user_id,body,created_at) VALUES(?,?,?,?,?)"
+          ).bind(firstCommentId, id, user.id, text, now),
       env.DB.prepare("UPDATE threads SET snapshot_status=? WHERE id=?").bind(snapshotStatus, id),
       enqueueWebhook(env.DB, project, { ...webhookEvent(
           "comment.created",
@@ -1764,10 +1782,10 @@ async function route(
     );
   }
   const match = url.pathname.match(
-    /^\/threads\/([\w:-]{1,100})(?:\/comments(?:\/([\w:-]{1,100})(?:\/(reactions))?)?)?$/
+    /^\/threads\/([\w:-]{1,100})(?:\/comments(?:\/([\w:-]{1,100})(?:\/(reactions|image))?)?)?$/
   );
   check(match, 404, "Not found.");
-  const [, threadId, commentId, reaction] = match;
+  const [, threadId, commentId, action] = match;
   const thread = await env.DB.prepare(
     "SELECT * FROM threads WHERE id=? AND project=? AND repo=? AND branch=?"
   )
@@ -1883,9 +1901,13 @@ async function route(
     const text = string(data.body, 4000, "reply");
     const replyId = crypto.randomUUID();
     const result = await env.DB.batch([
-      env.DB.prepare(
-        "INSERT INTO comments(id,thread_id,user_id,body,created_at) SELECT ?,?,?,?,? WHERE (SELECT COUNT(*) FROM comments WHERE thread_id=?)<200"
-      ).bind(replyId, threadId, user.id, text, now, threadId),
+      apiKeyName
+        ? env.DB.prepare(
+            "INSERT INTO comments(id,thread_id,user_id,body,created_at,api_key_name) SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM comments WHERE thread_id=?)<200"
+          ).bind(replyId, threadId, user.id, text, now, apiKeyName, threadId)
+        : env.DB.prepare(
+            "INSERT INTO comments(id,thread_id,user_id,body,created_at) SELECT ?,?,?,?,? WHERE (SELECT COUNT(*) FROM comments WHERE thread_id=?)<200"
+          ).bind(replyId, threadId, user.id, text, now, threadId),
       env.DB.prepare("UPDATE threads SET updated_at=? WHERE id=?").bind(
         now,
         threadId
@@ -1924,7 +1946,50 @@ async function route(
     .bind(commentId, threadId)
     .first<CommentRow>();
   check(comment, 404, "Comment not found.");
-  if (reaction && request.method === "POST") {
+  if (action === "image") {
+    check(comment.body !== "[Comment deleted]", 404, "Comment not found.");
+    if (request.method === "GET") {
+      const image = await env.DB.prepare("SELECT mime,bytes FROM comment_images WHERE comment_id=?")
+        .bind(commentId).first<{ mime: string; bytes: unknown }>();
+      check(image, 404, "Image not found.");
+      const bytes = blobBytes(image.bytes);
+      return new Response(bytes as Uint8Array<ArrayBuffer>, {
+        headers: {
+          "Content-Type": image.mime,
+          "X-Content-Type-Options": "nosniff",
+          "Content-Security-Policy": "sandbox; default-src 'none'",
+          "Cache-Control": "private, max-age=300",
+        },
+      });
+    }
+    check(request.method === "PUT" || request.method === "DELETE", 405, "Method not allowed.");
+    check(comment.user_id === user.id, 403, "Only the author can change this image.");
+    if (request.method === "DELETE") {
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM comment_images WHERE comment_id=?").bind(commentId),
+        env.DB.prepare("UPDATE threads SET updated_at=? WHERE id=?").bind(now, threadId),
+      ]);
+      return json({ ok: true });
+    }
+    check(user.verified || (auth.allowGuests && config.allowGuestSnapshots === true),
+      403, "Guests cannot attach images in this project.");
+    await limit(env, `${project}:snapshot:${user.id}`, 60, 600);
+    const image = await readSnapshot(request, "image");
+    const [stored] = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO comment_images(comment_id,project,mime,bytes,size,created_at)
+         SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM comments WHERE id=? AND body<>'[Comment deleted]')
+         AND (SELECT COALESCE(SUM(size),0) FROM comment_images WHERE project=? AND comment_id<>?)
+         + (SELECT COALESCE(SUM(s.size),0) FROM snapshots s JOIN threads t ON t.id=s.thread_id WHERE t.project=?)
+         + ? <= ? ON CONFLICT(comment_id) DO UPDATE SET mime=excluded.mime,bytes=excluded.bytes,size=excluded.size,created_at=excluded.created_at`
+      ).bind(commentId, project, image.mime, image.bytes, image.bytes.length, now, commentId,
+        project, commentId, project, image.bytes.length, snapshotCap(config.maxSnapshotBytes)),
+      env.DB.prepare("UPDATE threads SET updated_at=? WHERE id=?").bind(now, threadId),
+    ]);
+    check(stored.meta.changes, 409, "Could not attach the image. Check the comment and the project storage limit.");
+    return json({ ok: true }, 201);
+  }
+  if (action === "reactions" && request.method === "POST") {
     const data = await body(request);
     check(
       isEmoji(data.emoji) && typeof data.active === "boolean",
@@ -1954,7 +2019,7 @@ async function route(
     return json({ ok: true });
   }
   check(
-    !reaction && comment.user_id === user.id,
+    !action && comment.user_id === user.id,
     403,
     "Only the author can change this comment."
   );
@@ -1981,6 +2046,7 @@ async function route(
         now,
         commentId
       ),
+      env.DB.prepare("DELETE FROM comment_images WHERE comment_id=?").bind(commentId),
       env.DB.prepare("DELETE FROM reactions WHERE comment_id=?").bind(
         commentId
       ),
@@ -2094,7 +2160,7 @@ export default {
       headers.set("Access-Control-Allow-Origin", origin);
       headers.set(
         "Access-Control-Allow-Methods",
-        "GET, POST, PATCH, DELETE, OPTIONS"
+        "GET, POST, PUT, PATCH, DELETE, OPTIONS"
       );
       headers.set(
         "Access-Control-Allow-Headers",

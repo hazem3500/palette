@@ -211,7 +211,7 @@ export function storeSnapshot(
 ) {
   return db
     .prepare(
-      `INSERT ${replace ? "" : "OR IGNORE "}INTO snapshots(thread_id,kind,mime,bytes,size,created_at) SELECT ?,?,?,?,?,? WHERE (SELECT COALESCE(SUM(s.size),0) FROM snapshots s JOIN threads t ON t.id=s.thread_id WHERE t.project=? AND NOT (s.thread_id=? AND s.kind=?))+?<=?${
+      `INSERT ${replace ? "" : "OR IGNORE "}INTO snapshots(thread_id,kind,mime,bytes,size,created_at) SELECT ?,?,?,?,?,? WHERE (SELECT COALESCE(SUM(s.size),0) FROM snapshots s JOIN threads t ON t.id=s.thread_id WHERE t.project=? AND NOT (s.thread_id=? AND s.kind=?))+(SELECT COALESCE(SUM(size),0) FROM comment_images WHERE project=?)+?<=?${
         replace
           ? " ON CONFLICT(thread_id,kind) DO UPDATE SET mime=excluded.mime,bytes=excluded.bytes,size=excluded.size,created_at=excluded.created_at"
           : " RETURNING thread_id"
@@ -227,6 +227,7 @@ export function storeSnapshot(
       project,
       threadId,
       snapshot.kind,
+      project,
       snapshot.bytes.length,
       cap
     );
