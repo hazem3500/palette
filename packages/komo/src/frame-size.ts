@@ -145,7 +145,7 @@ export function mountFrameSize(
   surface: () => HTMLElement,
   key: string,
   /** Re-layout; `toggled` when the reviewer turned Simulate real viewport on or off. */
-  apply: (toggled?: boolean) => void,
+  apply: (toggled: boolean, allowShell: boolean) => void,
   // Passed in, so this chunk does not pull the eager layout module into a shared chunk.
   frameView: typeof placeView,
   /**
@@ -199,7 +199,7 @@ export function mountFrameSize(
   let pan: Size = [0, 0];
   let range: Size = [0, 0];
   let pointer: { x: number; y: number } | null = null;
-  const change = (next: Choice, zoom: boolean, persist = true, own = separate) => {
+  const change = (next: Choice, zoom: boolean, persist = true, own = separate, allowShell = false) => {
     // Fit to 100% keeps the selection, or the point last under the pointer, where it was.
     // (The page itself only: the viewport iframe's port scrolls itself and starts at the frame's top-left.)
     if (zoom && !actual && current && lastBox && !state.active) {
@@ -213,7 +213,7 @@ export function mountFrameSize(
     actual = zoom;
     const toggled = own !== separate || (own && !!state.reason && !state.active);
     separate = own;
-    apply(toggled);
+    apply(toggled, allowShell);
     if (persist) remember();
   };
   const layer = element("div", "frame-size");
@@ -266,7 +266,7 @@ export function mountFrameSize(
     item.append(label, readout);
     item.addEventListener("click", () => {
       close();
-      change(choice, actual);
+      change(choice, actual, true, separate, true);
     });
     return item;
   });
@@ -292,7 +292,7 @@ export function mountFrameSize(
   custom.addEventListener("submit", (event) => {
     event.preventDefault();
     close();
-    change([clamp(+fields[0].value), clamp(+fields[1].value, 1)], actual);
+    change([clamp(+fields[0].value), clamp(+fields[1].value, 1)], actual, true, separate, true);
   });
   // Zoom: Fit and 100%, with their keys (⇧1 and ⇧0, as in design tools).
   const zoomKeys: Shortcut[] = ["1", "0"].map((key) => ({ key, shift: true, alt: false, ctrl: false, meta: false, label: `Shift+${key}` }));
@@ -454,7 +454,7 @@ export function mountFrameSize(
   }
   simulate.addEventListener("click", () => {
     chosen = true;
-    change(size, actual, true, !separate);
+    change(size, actual, true, !separate, true);
     simulate.setAttribute("aria-checked", String(separate));
   });
   hintFull.addEventListener("click", () => zoomTo(true));

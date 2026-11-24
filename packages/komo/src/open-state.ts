@@ -1,6 +1,8 @@
 import { forget } from "./storage-keys.js";
 import type { CommentsOptions } from "./types.js";
 
+export type ReviewView = { scope: string; thread: string | null; design: boolean };
+
 /** Remembers whether the sidebar was open, per `restoreOpen`. */
 export function openState(
   key: string,
@@ -19,7 +21,26 @@ export function openState(
   } catch {
     /* Start closed when storage is blocked. */
   }
+  const viewKey = `${key}:view`;
   return {
+    view(scope: string): ReviewView | null {
+      try {
+        const view = JSON.parse(store?.getItem(viewKey) ?? "null");
+        if (view?.scope === scope && typeof view.design === "boolean" &&
+          (view.thread === null || typeof view.thread === "string")) return view;
+      } catch {
+        /* A remembered view is optional. */
+      }
+      return null;
+    },
+    setView(view: ReviewView | null) {
+      try {
+        if (view) store?.setItem(viewKey, JSON.stringify(view));
+        else store?.removeItem(viewKey);
+      } catch {
+        /* Keep the view in memory when storage is blocked. */
+      }
+    },
     get() {
       try {
         return store?.getItem(key) === "1";

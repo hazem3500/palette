@@ -363,7 +363,7 @@ const tokens: TailwindToken[] = [
   { path: "radius.md", type: "dimension", class: "rounded-md", properties: ["border-radius"], value: "6px" },
   { path: "typography.h1", type: "typography", class: "text-h1",
     properties: ["font-size", "line-height", "font-weight"], value: "32px/40px 600" },
-  ...tailwindSpacing(), // p-*, px-*, …, m-*, gap-* on the 4px scale
+  ...tailwindSpacing(), // p-*, px-*, …, m-*, gap-*, w-*, h-* on the 4px scale
 ];
 
 initPalette({ project, design: { tokens: tailwindTokens({ tokens }, { themes: [mode, product] }), themes: [mode, product] } });
@@ -373,7 +373,7 @@ initPalette({ project, design: { tokens: tailwindTokens({ tokens }, { themes: [m
 - `values` keys are option ids (`dark`), `axis=option` pairs (`mode=dark`), or combinations joined with `+` (`track+dark`). The most specific match wins, then `value`.
 - `resolve()` reads base-state classes only; variants such as `hover:` or `md:` are ignored. When classes overlap, the narrower class wins, as in Tailwind (`p-4 px-2` reads `padding-left` from `px-2`). Properties with no table class are reported off-token with their computed value; pass `offToken: [...]` to narrow the list or `false` to turn it off.
 - Previews replace table classes the new class fully covers, keep everything else in place, and stack; undoing restores the original `class` exactly. Classes outside the table, such as `text-[14px]`, are left alone.
-- `tailwindSpacing({ prefix, scale, steps })` narrows the families (`p`, `px`, `py`, `pt`, `pr`, `pb`, `pl`, `m`, `mx`, …, `gap`, `gap-x`, `gap-y`), the pixels per step (default 4), and the steps (default Tailwind's 0 to 96). Paths are `spacing.<class>`, for example `spacing.p-4`.
+- `tailwindSpacing({ prefix, scale, steps })` narrows the families (`p`, `px`, `py`, `pt`, `pr`, `pb`, `pl`, `m`, `mx`, …, `gap`, `gap-x`, `gap-y`, `w`, `h`), the pixels per step (default 4), and the steps (default Tailwind's 0 to 96). Paths are `spacing.<class>`, for example `spacing.p-4`.
 - Tailwind's JIT only emits CSS for classes it finds in source, so a full table can list classes such as `p-9` or `mt-96` that have no rule and preview nothing. `tailwindTokens(table, { onlyGenerated: true })` lists only tokens whose first class has a rule in the page's stylesheets, including rules inside `@media`, `@supports`, `@layer`, `@container`, nested rules and same-origin `@import`. Names are matched exactly as escaped CSS, so `p-1.5`, `w-1/2`, `-mt-4`, `p-[13px]`, `md:p-4` and `!p-4` each need their own rule. The scan runs on the first `list()` and again only when a stylesheet is added, removed, replaced, loads or gains rules, including `adoptedStyleSheets`. With `onlyGenerated`, the adapter also has `subscribe()`: adding, removing, editing or loading a `<style>` or `<link>` refreshes the list in Design mode, including an open picker. Rules added only through `insertRule()` or `adoptedStyleSheets` show with the next such change.
 - Cross-origin sheets: Palette cannot read a cross-origin stylesheet served without CORS, such as a font stylesheet pulled in with `@import url(https://fonts…)`. By default it skips each unreadable sheet or `@import`, assumes it holds no utility CSS, and filters with the rest. It hides nothing while a `<link>` stylesheet is still loading or failed, or when no readable sheet has a style rule. If your utilities themselves come from another origin, pass `onlyGenerated: { strict: true }`, which hides nothing while any sheet is unreadable, or serve that CSS with `crossorigin` on the `<link>` and `Access-Control-Allow-Origin`. `onlyGenerated: true` is the default object.
 - `filter(token)` returning `false` leaves a token out of `list()`, alone or with `onlyGenerated`. Hidden tokens still resolve on elements that already use their class.
@@ -495,6 +495,10 @@ Tokens start with `palette_pat_` (`komo_pat_` for tokens issued before the renam
 | --- | --- |
 | `comments:read` | List and read threads, `palette whoami`. |
 | `comments:write` | Create threads, reply, edit, react, resolve, tag, move. |
+
+Comments and replies support Markdown links, bold, emphasis, inline code, and fenced code blocks. Raw HTML is displayed as text.
+
+To attach a PNG or WebP (up to 256 KiB) with a token, post the comment first, then send the image as the raw body of `PUT /threads/{threadId}/comments/{commentId}/image` with its image content type. The comment author can upload or replace the image. The authenticated thread response includes the image URL. To add or remove your reaction, send `POST /threads/{threadId}/comments/{commentId}/reactions` with `{"emoji":"👍","active":true}` or `active:false`. Project bot tokens can use both endpoints for the projects they belong to.
 
 A token acts as its owner, narrowed by its scopes and project list: it never passes an ownership check or private-project invitation its owner would fail, and it cannot manage tokens, projects, members, or webhooks. Credentials resolve in this order: `PALETTE_TOKEN`, a token saved by `palette login --token`, then a browser login session.
 
@@ -635,7 +639,7 @@ Pass these to `initPalette(config)` from `@hazem3500/palette` or `usePalette(con
 | `sessionEndpoint` | `string` | `endpoint` | Canonical API identity for trusted gateways to the same service; never share across independent APIs. |
 | `avatar` | `(user: { id, name }) => string \| undefined` | None | Photo URL for signed-in reviewers the server has none for, such as IAP sign-in. HTTPS only; guests keep their initial. |
 | `snapshots` | `{ image?, html?, maxBytes?, redact?(element) }` | Off | Save an image and/or trimmed HTML of the commented element with each new thread. See [Comment snapshots](#comment-snapshots). |
-| `share` | `{ label }` | Off | Let reviewers keep new comments out of a webhook integration, e.g. `{ label: "Post to the GitHub PR" }`. Adds a setting to the Account panel that every new comment follows; a kept comment's `comment.created` event carries `share: false`. Needs a server with `config.share` ([NODE.md](NODE.md#keeping-comments-out-of-integrations)). |
+| `share` | `{ label }` | Off | Let reviewers keep new comments out of a webhook integration, e.g. `{ label: "Post to the GitHub PR" }`. Adds an account default and a checkbox for each new comment; a kept comment's `comment.created` event carries `share: false`. Needs a server with `config.share` ([NODE.md](NODE.md#keeping-comments-out-of-integrations)). |
 
 Google sign-in uses the account photo (`picture`) automatically, loaded from `lh3.googleusercontent.com`. Under a restrictive CSP, allow that host (or your `avatar` host) in `img-src`; blocked or failed photos fall back to the initial.
 
@@ -769,7 +773,7 @@ Worker bindings: `DB` (D1), optional `EDGE_LIMIT` (rate limiter). Variables: `PR
 
 ### Element snapshots
 
-A comment can carry a snapshot of its target element: one image (`image/webp` or `image/png`, up to 256 KiB) and one trimmed HTML capture (`text/html`, UTF-8, up to 32 KiB) per thread. Capture is opt-in on the client. **Snapshots may contain page content and user data**, so treat them like the comments they belong to.
+A comment can carry a snapshot of its target element: one image (`image/webp` or `image/png`, up to 256 KiB) and one trimmed HTML capture (`text/html`, UTF-8, up to 32 KiB) per thread. Element capture is opt-in on the client. Dragging a region in comment mode previews an image of that area unless image capture is disabled. You can attach a PNG, JPEG, or WebP to a new comment and click the image to open a larger preview for marking it up before posting. **Snapshots may contain page content and user data**, so treat them like the comments they belong to.
 
 - `POST /threads/:id/snapshot?kind=image|html` takes the raw file with its `Content-Type`, or `multipart/form-data` with `kind` and `file` fields. A new upload replaces the thread's previous snapshot of that kind. Uploads need a session with write access to the project; guests are refused unless the project sets `allowGuestSnapshots`, and then only on their own threads. The thread's author or a signed-in reviewer can replace or `DELETE /threads/:id/snapshot/:kind`.
 - `GET /threads/:id/snapshot/:kind` needs a session, even on link-access projects, and returns `Cache-Control: private`, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`. HTML is always served as `text/plain`; show it to agents or in a sandboxed viewer, never as live markup.
@@ -870,12 +874,12 @@ The `@hazem3500/palette/server` export loads built ESM in Node and includes Work
 
 ### Experimental page-element resize and move
 
-Both are **off by default**. Opt in explicitly in the public configuration:
+Resize handles and movement are available in Design mode. To turn them off:
 
 ```ts
 initPalette({
   // ...your existing endpoint/project/repo/branch options
-  design: { experimentalGeometry: true },
+  design: { experimentalGeometry: false },
 });
 ```
 

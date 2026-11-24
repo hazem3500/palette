@@ -323,13 +323,36 @@ run(
       }),
     });
     expect(created.status).toBe(201);
-    const { id } = (await created.json()) as { id: string };
+    const { id, commentId } = (await created.json()) as { id: string; commentId: string };
     const afterThread = await quota();
     const png = (size: number) => {
       const bytes = new Uint8Array(size).fill(1);
       bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
       return bytes;
     };
+    const attachment = `/threads/${id}/comments/${commentId}/image`;
+    const attach = (size: number) => send(attachment, "PUT", { token, type: "image/png", body: png(size) });
+    const setThreadTime = (time: number) =>
+      db.prepare("UPDATE threads SET updated_at=? WHERE id=?").bind(time, id).run();
+    const threadTime = async () =>
+      (await db.prepare("SELECT updated_at FROM threads WHERE id=?").bind(id).first<{ updated_at: number }>())!.updated_at;
+    await setThreadTime(1);
+    expect((await attach(100)).status).toBe(201);
+    expect(await threadTime()).toBeGreaterThan(1);
+    expect((await quota()).bytes).toBe(afterThread.bytes + 100 + 256);
+    await setThreadTime(2);
+    expect((await attach(104)).status).toBe(201);
+    expect(await threadTime()).toBeGreaterThan(2);
+    const attachedQuota = await quota();
+    expect(attachedQuota.bytes).toBe(afterThread.bytes + 104 + 256);
+    await setThreadTime(3);
+    expect((await attach(100000)).status).toBe(409);
+    expect(await threadTime()).toBe(3);
+    expect(await quota()).toEqual(attachedQuota);
+    expect(new Uint8Array(await (await send(attachment, "GET", { token })).arrayBuffer())).toEqual(png(104));
+    expect((await send(attachment, "DELETE", { token })).status).toBe(200);
+    expect(await quota()).toEqual(afterThread);
+
     const upload = (body: BodyInit, type?: string, as = token, query = "") =>
       send(`/threads/${id}/snapshot${query}`, "POST", { type, token: as, body });
     expect((await upload(png(40000), "image/png")).status).toBe(201);

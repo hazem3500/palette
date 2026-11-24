@@ -266,7 +266,7 @@ export async function authenticateToken(
   project: string,
   access: PatAccess | undefined,
   request: Request
-): Promise<TokenUser> {
+): Promise<TokenUser & { tokenName: string }> {
   const parts = bearer.match(PAT_PATTERN);
   const row = parts
     ? await env.DB.prepare(
@@ -339,5 +339,5 @@ export async function authenticateToken(
       method: request.method,
       path: new URL(request.url).pathname,
     }).run();
-  return user;
+  return { ...user, tokenName: row.name };
 }

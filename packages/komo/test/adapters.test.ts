@@ -224,6 +224,8 @@ describe("tailwindSpacing", () => {
     expect(all.find((item) => item.class === "px-0.5")).toMatchObject({ properties: ["padding-left", "padding-right"], value: "2px" });
     expect(all.find((item) => item.class === "gap-x-96")).toMatchObject({ properties: ["column-gap"], value: "384px", group: "Gap" });
     expect(all.find((item) => item.class === "mt-2")).toMatchObject({ properties: ["margin-top"], group: "Margin" });
+    expect(all.find((item) => item.class === "h-4")).toMatchObject({ properties: ["height"], value: "16px" });
+    expect(all.find((item) => item.class === "w-4")).toMatchObject({ properties: ["width"], value: "16px" });
     expect(new Set(all.map((item) => item.path)).size).toBe(all.length);
     expect(tailwindSpacing({ prefix: ["gap"], scale: 8, steps: [1, 2] })).toMatchObject([{ class: "gap-1", value: "8px" }, { class: "gap-2", value: "16px" }]);
     expect(() => tailwindSpacing({ prefix: ["space-x"] })).toThrow(/space-x/);

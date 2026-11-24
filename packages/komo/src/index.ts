@@ -59,7 +59,7 @@ import {
 } from "./drawer-expand-motion.js";
 import { recordEmoji } from "./emoji-history.js";
 import { reactionPicker } from "./reaction-picker.js";
-import { appendMessageLinks } from "./message-links.js";
+import { appendRichComment } from "./message-links.js";
 import { animate, loadMotion } from "./lazy-motion.js";
 import { actionMenu, selectionMenu } from "./action-menu.js";
 import {
@@ -75,7 +75,7 @@ import { createToolbar, type ToolbarMenuItem } from "./lazy-toolbar.js";
 import { defaultToolbarItems, normalizeToolbarItems, toolbarLayout } from "./toolbar-items.js";
 import { canonicalPage } from "./page.js";
 import { allPages as everyPage, inPersistentRegion, threadOnPage } from "./thread-scope.js";
-import { openState } from "./open-state.js";
+import { openState, type ReviewView } from "./open-state.js";
 import { ApiError, CommentsApi } from "./api.js";
 import { connectionIssue, type ConnectionIssue } from "./connection-issue.js";
 import {
@@ -323,8 +323,12 @@ export function initComments(options: CommentsOptions): CommentsController {
     draft: Anchor | null = null;
   type ThreadRequest = { id: string; inspect: boolean; pending: boolean; rejected: boolean; opened?: boolean };
   let threadRequest: ThreadRequest | null = null;
+  let rememberedView: ReviewView | null = null;
+  let viewReady = false;
+  let savedView = "";
   const cancelledLinks = new Set<string>();
   function cancelThreadRequest() {
+    rememberedView = null;
     if (threadRequest && !threadRequest.opened) cancelledLinks.add(threadRequest.id);
     threadRequest = null;
   }
@@ -624,18 +628,30 @@ export function initComments(options: CommentsOptions): CommentsController {
    * `{ image?: data URL, html?, note? }`, so the composer can show it; posting
    * uploads it once the thread exists.
    */
-  const snapshot = (anchor: Anchor, post?: (kind: string, body: Blob) => Promise<unknown>) =>
-    (options.snapshots?.image || options.snapshots?.html) && snapshotLimits && api.user && (api.user.verified || snapshotLimits.guests)
-      ? import("./snapshot.js").then((module) => module.snapshotFor(anchor, resolveAnchor, options.snapshots!, snapshotLimits!, post), () => null)
-      : undefined;
+  const draftImages = new WeakMap<Anchor, Promise<import("./snapshot.js").CapturedSnapshot | null>>();
+  const canAttachImage = () => !!snapshotLimits?.maxImageBytes && !!api.user &&
+    (api.user.verified || snapshotLimits.guests);
+  const snapshot = (anchor: Anchor, post?: (kind: string, body: Blob) => Promise<unknown>) => {
+    const attachment = draftImages.get(anchor);
+    const settings = options.snapshots;
+    const area = anchor.width > 0 && anchor.height > 0;
+    const image = settings?.image ?? area;
+    if (snapshotLimits && canAttachImage() && (attachment || image || settings?.html))
+      return import("./snapshot.js").then((module) => module.snapshotFor(
+        anchor, resolveAnchor, { ...settings, image }, snapshotLimits!, post,
+        area ? anchor : undefined, attachment,
+      ), () => null);
+  };
   // Saved snapshots (thumbnails, the not-found fallback, the viewer, the draft preview)
   // render from their own chunk, loaded when a thread or draft first has one.
   let snapshotView: Promise<typeof import("./thread-snapshot.js")> | undefined;
   const loadSnapshotView = () => (snapshotView ??= import("./thread-snapshot.js"));
   // Drafts whose capture the reviewer removed before posting.
   const droppedSnapshots = new WeakSet<Anchor>();
+  const draftSharing = new WeakMap<Anchor, boolean>();
+  const loadingDraftImages = new WeakSet<Anchor>();
   /** A slot the snapshot chunk fills (see mountSnapshot). */
-  const snapshotSlot = (mode: number, thread: Pick<Thread, "anchor" | "snapshot" | "page" | "id">, shot?: Promise<object | null>) => {
+  const snapshotSlot = (mode: number, thread: Pick<Thread, "anchor" | "snapshot" | "page" | "id">, shot?: Promise<import("./snapshot.js").CapturedSnapshot | null>) => {
     const slot = el("div");
     void loadSnapshotView().then((module) => destroyed || module.mountSnapshot(slot, snapshotContext, mode, thread, shot), () => {});
     return slot;
@@ -684,6 +700,17 @@ export function initComments(options: CommentsOptions): CommentsController {
     token: () => api.token,
     origin: () => new URL(options.endpoint).origin,
     dropped: droppedSnapshots,
+    annotate(anchor, shot) {
+      const limit = snapshotLimits?.maxImageBytes;
+      if (draft !== anchor || !limit || !shot.image) return;
+      void import("./snapshot-annotate.js").then(({ annotateImage }) =>
+        annotateImage(shadow, shot.image!, limit, shot.markup, abort.signal, (image, markup) => {
+          if (draft !== anchor || destroyed) return;
+          draftImages.set(anchor, Promise.resolve({ ...shot, image, markup }));
+          renderDialog();
+        }),
+      ).catch(() => notify("The image editor could not open."));
+    },
     go: (url) => void go(url),
     notify,
     remove: (thread) =>
@@ -848,7 +875,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     if (shellMoving) return;
     shellMoving = true;
     frameControls?.status({ active: false, loading: true });
-    // A remembered Frame reopening on load has nothing to lose yet; otherwise ask when Design has unposted changes.
+    // The prompt protects unposted Design edits when the reviewer switches viewport mode.
     void shellMode().then(({ enterShell }) =>
       !destroyed && enterShell(options.project, ask, !!designController?.edited, (reason) => {
         if (destroyed) return;
@@ -956,7 +983,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     frameControlsLoading = true;
     void import("./frame-size.js").then(({ mountFrameSize }) => {
       if (destroyed) return;
-      frameControls = mountFrameSize(shadow, () => (viewportShown && viewport ? viewport.port : surface), frameSizeKey, (toggled) => {
+      frameControls = mountFrameSize(shadow, () => (viewportShown && viewport ? viewport.port : surface), frameSizeKey, (toggled, allowShell) => {
         // Turning Simulate real viewport on again retries one that couldn't load, and asks for a single copy again.
         if (toggled) {
           viewportFailed = "";
@@ -967,7 +994,7 @@ export function initComments(options: CommentsOptions): CommentsController {
           }
         }
         appliedViewport = "";
-        scalePage();
+        scalePage(allowShell);
         geometry();
       }, frameView, viewportEnabled && (options.frame?.defaultMode === "transform" ? "transform" : "iframe"), {
         pan: schedulePan,
@@ -987,7 +1014,7 @@ export function initComments(options: CommentsOptions): CommentsController {
       // Re-layout only for a remembered size; the default keeps Frame's entrance motion.
       if (frameControls.sized) {
         appliedViewport = "";
-        scalePage();
+        scalePage(true);
       } else frameControls.update(frameArea, htmlZoom());
     });
   }
@@ -1103,6 +1130,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     `palette:open:${options.project}:${options.repo}`,
     options.restoreOpen,
   );
+  const viewScope = () => JSON.stringify([options.branch, page()]);
   const toolbarDismissKey = `palette:toolbar-dismissed:${options.project}:${options.repo}`;
   try {
     if (sessionStorage.getItem(toolbarDismissKey) === "1") {
@@ -1986,7 +2014,7 @@ export function initComments(options: CommentsOptions): CommentsController {
         renderToolbar();
       }
       // A linked comment may only be readable after a sign-in.
-      if (changed) void openDeepLink();
+      if (changed || rememberedView) void openDeepLink();
       return changed;
     } catch (reason) {
       if (
@@ -2042,7 +2070,10 @@ export function initComments(options: CommentsOptions): CommentsController {
       syncDesignFrame();
     }
     commentMode = value;
-    if (value) revealComments();
+    if (value) {
+      revealComments();
+      live.textContent = "Click an element or drag to mark an area.";
+    }
     if (expanded && !inFrame()) toggleExpanded(false);
     const restore = value ? (parkedDraft ?? recoveredDrafts.shift()) : null;
     if (restore) {
@@ -2153,7 +2184,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     restoreBody();
     restoreHtml();
   }
-  function scalePage() {
+  function scalePage(allowShell = false) {
     const zoom = htmlZoom();
     const viewportHeight = isCompactReview(
       window.innerWidth,
@@ -2235,9 +2266,10 @@ export function initComments(options: CommentsOptions): CommentsController {
       ? { ...box, scale: 1, pan: false }
       : (frameControls?.view(box, windowSize) ?? frameView(box, windowSize, false));
     // At the window's own size the page in place already matches a real viewport, so the
-    // single-copy shell, which reloads the tab both in and out, waits for another size.
+    // single-copy shell waits for Frame to open at a saved size or for an explicit menu choice.
     const reloads = shellWanted && !shell;
-    if (useFrame && !scaled && wantsViewport() && !(reloads && (frameControls?.fitsWindow ?? true))) {
+    const canEnterShell = allowShell && frameControls && !frameControls.fitsWindow;
+    if (useFrame && !scaled && wantsViewport() && (!reloads || canEnterShell)) {
       if (reloads) enterShell();
       else openViewport();
     } else if (shell && shellReady) return leaveShell();
@@ -2710,7 +2742,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     });
   }
   function toggleExpanded(value: boolean, keepOpenState = false) {
-    if (!value && threadRequest && !threadRequest.opened) cancelThreadRequest();
+    if (!value && !keepOpenState && (rememberedView || (threadRequest && !threadRequest.opened))) cancelThreadRequest();
     if (value !== expanded) cancelPinMove();
     // Opening the list is a request to see comments again.
     if (value) revealComments();
@@ -2769,7 +2801,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     toolbarPlacement = value ? undefined : savedToolbarPlacement;
     dockCenter = undefined;
     hidden = false;
-    scalePage();
+    scalePage(opening);
     render();
     dockMotion?.stop();
     toolbar.style.translate = "0px 0px";
@@ -2855,6 +2887,7 @@ export function initComments(options: CommentsOptions): CommentsController {
       revealComments();
       if (reopen) toggleExpanded(true);
       else render();
+      if (rememberedView) void openDeepLink();
       return;
     }
     cancelPinMove();
@@ -3345,7 +3378,7 @@ export function initComments(options: CommentsOptions): CommentsController {
       if (rect.y < -rect.height - 40 || rect.y > window.innerHeight + 40)
         return { thread, rect, blocked: false };
       const target = anchors.resolve(thread.anchor);
-      const hit = siteElementAt(rect.x + 8, rect.y - 10);
+      const hit = siteElementAt(rect.x, rect.y);
       const blocked = !!(
         target &&
         hit &&
@@ -4496,6 +4529,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     row.append(
       avatar(comment.author),
       el("span", "author", comment.author.name),
+      ...(comment.apiKeyName ? [el("span", "api-key-tag", comment.apiKeyName)] : []),
       el("small", "", age(comment.createdAt)),
     );
     row.title = comment.author.verified ? "Verified" : "Guest";
@@ -4644,15 +4678,23 @@ export function initComments(options: CommentsOptions): CommentsController {
       return item;
     }
     const content = el("div", "message-content");
+    if (comment.image) {
+      const slot = el("div", "comment-image");
+      const image = comment.image;
+      void loadSnapshotView().then(({ mountCommentImage }) => {
+        if (!destroyed && slot.isConnected) mountCommentImage(slot, snapshotContext, image, thread.anchor);
+      }, () => {});
+      content.append(slot);
+    }
     const design = designProposal.test(comment.body);
-    const message = el(design ? "div" : "p", "message-text");
-    appendMessageLinks(message, comment.body);
+    const message = el("div", "message-text");
+    appendRichComment(message, comment.body);
     if (design) {
       const show = ({ renderDesignComment }: typeof import("./design-comment.js")) =>
         renderDesignComment(message, comment.body, {
           key: comment.id,
           resolve: (selector) => onThreadPage(thread) ? designTarget(thread.anchor)(selector) : null,
-          note: appendMessageLinks,
+          note: appendRichComment,
           sourceHref: sourceLink,
           design: options.design,
           tip: tipFor,
@@ -5021,9 +5063,10 @@ export function initComments(options: CommentsOptions): CommentsController {
     }
     // A proposal can be posted on its own; the note is optional.
     input.addEventListener("input", () => {
-      send.disabled = pending || (!input.value.trim() && !proposal);
+      send.disabled = pending || (!thread && !!draft && loadingDraftImages.has(draft)) ||
+        (!input.value.trim() && !proposal);
     });
-    send.disabled ||= !input.value.trim() && !proposal;
+    send.disabled ||= (!thread && !!draft && loadingDraftImages.has(draft)) || (!input.value.trim() && !proposal);
     input.addEventListener("palette-sync-reply", () => {
       if (!thread || !input.isConnected || (shadow.activeElement === input && replies.has(thread.id))) return;
       input.value = replies.get(thread.id) ?? "";
@@ -5032,6 +5075,43 @@ export function initComments(options: CommentsOptions): CommentsController {
       send.disabled = pending || !input.value.trim();
       if (!input.closest<HTMLElement>(".sidebar-replies")?.hidden) resizeInput();
     });
+    if (!thread && draft && sharing()) {
+      const anchor = draft;
+      form.append(shareToggle(options.share!.label, draftSharing.get(anchor) ?? api.shareComments,
+        "draft-share", (share) => draftSharing.set(anchor, share)));
+    }
+    if (!thread && draft && canAttachImage()) {
+      const anchor = draft;
+      const file = el("input");
+      file.type = "file";
+      file.accept = "image/png,image/jpeg,image/webp";
+      file.hidden = true;
+      const attach = button(draftImages.has(anchor) && !droppedSnapshots.has(anchor) ? "Replace image" : "Attach image",
+        () => file.click(), "secondary draft-image");
+      attach.disabled = pending || loadingDraftImages.has(anchor);
+      file.addEventListener("change", () => {
+        const image = file.files?.[0];
+        const limit = snapshotLimits?.maxImageBytes;
+        if (!image || !limit) return;
+        loadingDraftImages.add(anchor);
+        attach.disabled = true;
+        send.disabled = true;
+        void import("./snapshot.js").then(({ imageAttachment }) => imageAttachment(image, limit)).then((shot) => {
+          loadingDraftImages.delete(anchor);
+          if (draft !== anchor || destroyed) return;
+          droppedSnapshots.delete(anchor);
+          draftImages.set(anchor, Promise.resolve(shot));
+          renderDialog();
+        }, (reason: unknown) => {
+          loadingDraftImages.delete(anchor);
+          if (draft !== anchor || destroyed) return;
+          attach.disabled = false;
+          send.disabled = pending || (!input.value.trim() && !proposal);
+          notify(reason instanceof Error ? reason.message : "The image could not be attached.");
+        });
+      });
+      form.append(attach, file);
+    }
     // Start the target's snapshot while the reviewer writes; the chunk shows it once captured.
     const shot = !thread && draft && !droppedSnapshots.has(draft) && snapshot(draft);
     if (shot) form.append(snapshotSlot(3, { anchor: draft!, page: "", id: "" }, shot));
@@ -5053,7 +5133,7 @@ export function initComments(options: CommentsOptions): CommentsController {
     }
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      if ((!input.value.trim() && !proposal) || pending) return;
+      if (send.disabled || (!input.value.trim() && !proposal)) return;
       if (!api.user) {
         submitAfterIdentity = () => postMessage(thread);
         openAccount();
@@ -5126,8 +5206,7 @@ export function initComments(options: CommentsOptions): CommentsController {
       const tags = draftTags;
       const note = draftText;
       const proposal = draftProposal;
-      // Each comment follows the reviewer's account default.
-      const share = sharing() ? api.shareComments : undefined;
+      const share = sharing() ? draftSharing.get(anchor) ?? api.shareComments : undefined;
       // Persistent layout, e.g. an app sidebar, carries its comments to every page.
       const target = resolveAnchor(anchor);
       const scope = target && inPersistentRegion(target, options) ? "all" as const : undefined;
@@ -5159,7 +5238,15 @@ export function initComments(options: CommentsOptions): CommentsController {
           );
           // Snapshots follow the saved thread and never hold up or fail the post.
           if (capture)
-            void snapshot(anchor, (kind, body) => client.request(`threads/${result.id}/snapshot?kind=${kind}`, "POST", body, body.type));
+            void snapshot(anchor, async (kind, body) => {
+              try {
+                await client.request(`threads/${result.id}/snapshot?kind=${kind}`, "POST", body, body.type);
+              } catch (error) {
+                if (kind === "image" && draftImages.has(anchor))
+                  notify("Comment posted. The image could not be uploaded.");
+                throw error;
+              }
+            });
           // The initial message ID is returned so queued edits target the persisted comment.
           const saved =
             result.commentId ??
@@ -5396,7 +5483,9 @@ export function initComments(options: CommentsOptions): CommentsController {
             ]
           : []),
         copy("Copy link", () => {
-          const url = new URL(thread.page, location.origin);
+          // A host may group comments by a workspace-independent path.
+          const current = pageFrame()?.contentWindow?.location ?? location;
+          const url = new URL(thread.page === page() ? current.pathname : thread.page, location.origin);
           url.searchParams.set("comment", thread.id);
           return url.href;
         }),
@@ -6555,6 +6644,15 @@ export function initComments(options: CommentsOptions): CommentsController {
     renderPins();
     renderList();
     renderDialog();
+    if (viewReady && !options.onboarding && !commentsHidden && !rememberedView) {
+      const scope = viewScope();
+      const thread = expanded || compactSidebar ? selected : null;
+      const key = JSON.stringify([scope, thread, designActive]);
+      if (key !== savedView) {
+        savedView = key;
+        openStore.setView(thread || designActive ? { scope, thread, design: designActive } : null);
+      }
+    }
     const commentsPanel = sidebar.querySelector<HTMLElement>(".panel");
     if (commentsPanel) {
       commentsPanel.inert = designActive;
@@ -6572,22 +6670,27 @@ export function initComments(options: CommentsOptions): CommentsController {
     x: number;
     y: number;
     element: Element;
+    areaOnly: boolean;
     pointerId: number;
   } | null = null;
   let selection: HTMLElement | null = null;
   catcher.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || drag) return;
     event.preventDefault();
     event.stopPropagation();
     const element = componentAt(event.clientX, event.clientY);
-    if (!element) return;
+    const root = framedRoot();
+    const hit = element ?? siteElementAt(event.clientX, event.clientY);
+    const background = hit === root || hit === root.ownerDocument.body;
+    if (!element && !background) return;
     hoverTarget = element;
     hoverPoint = null;
     hoverOutline.style.opacity = "0";
     drag = {
       x: event.clientX,
       y: event.clientY,
-      element,
+      element: element ?? root,
+      areaOnly: !element,
       pointerId: event.pointerId,
     };
     catcher.setPointerCapture(event.pointerId);
@@ -6600,6 +6703,7 @@ export function initComments(options: CommentsOptions): CommentsController {
       scheduleHover();
       return;
     }
+    if (drag.pointerId !== event.pointerId) return;
     Object.assign(selection.style, {
       left: `${Math.min(drag.x, event.clientX)}px`,
       top: `${Math.min(drag.y, event.clientY)}px`,
@@ -6643,12 +6747,16 @@ export function initComments(options: CommentsOptions): CommentsController {
     positionDialog();
   }
   catcher.addEventListener("pointerup", (event) => {
-    if (!drag) return;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     const target = drag;
     selection?.remove();
     selection = null;
     drag = null;
-    composeAt(target.element, target, { x: event.clientX, y: event.clientY });
+    if (!mode) return;
+    const end = { x: event.clientX, y: event.clientY };
+    const area = Math.abs(end.x - target.x) > 6 && Math.abs(end.y - target.y) > 6;
+    if (area || !target.areaOnly) composeAt(target.element, target, area ? end : target);
+    else updateHover();
   });
   catcher.addEventListener("pointerleave", () => {
     if (drag || draft) return;
@@ -6656,14 +6764,17 @@ export function initComments(options: CommentsOptions): CommentsController {
     hoverTarget = null;
     hoverOutline.style.opacity = "0";
   });
-  catcher.addEventListener("pointercancel", () => {
+  const cancelArea = (event: PointerEvent) => {
+    if (drag?.pointerId !== event.pointerId) return;
     drag = null;
     selection?.remove();
     selection = null;
     hoverPoint = null;
     hoverTarget = null;
     hoverOutline.style.opacity = "0";
-  });
+  };
+  catcher.addEventListener("pointercancel", cancelArea);
+  catcher.addEventListener("lostpointercapture", cancelArea);
   function geometry() {
     if (movingThread && !threads.some(thread => thread.id === movingThread && here(thread))) cancelPinMove();
     if (frame || destroyed || document.hidden) return;
@@ -6865,7 +6976,7 @@ export function initComments(options: CommentsOptions): CommentsController {
           node instanceof Element &&
           node.getRootNode() === shadow &&
           node.matches(
-            "button,input,textarea,summary,[role=menu],[role=listbox],.emoji-menu,.emoji-keyboard,.floating-notice",
+            "button,input,textarea,summary,[role=menu],[role=listbox],.emoji-menu,.emoji-keyboard,.floating-notice,.palette-snapshot-viewer",
           ),
       );
       if (
@@ -6918,6 +7029,7 @@ export function initComments(options: CommentsOptions): CommentsController {
   function checkPage() {
     if (destroyed || page() === lastPage) return;
     lastPage = page();
+    rememberedView = null;
     // A proposal previewed on the last route never stays behind on this one.
     designModule?.resetDesignPreviews();
     designController?.clearSelection();
@@ -7007,7 +7119,23 @@ export function initComments(options: CommentsOptions): CommentsController {
       threadRequest = { id, inspect: url.searchParams.get("comment-view") === "design", pending: false, rejected: false };
     }
     const request = threadRequest;
-    if (request && !request.opened && threads.some((t) => t.id === request.id)) await openRequestedThread(request);
+    if (request) {
+      if (!request.opened && threads.some((t) => t.id === request.id)) await openRequestedThread(request);
+      return;
+    }
+    const view = rememberedView;
+    if (!view || commentsHidden || toolbarDismissed) return;
+    const thread = threads.find((t) => t.id === view.thread && here(t));
+    // A signed-in refresh may arrive after the first cached or anonymous list.
+    if (view.thread && !thread && connection !== "Live") return;
+    rememberedView = null;
+    if (view.scope !== viewScope()) return;
+    selected = thread?.id ?? null;
+    if (view.design && designEnabled) {
+      if (thread) void openThreadInDesign(thread);
+      else setDesignMode(true);
+    }
+    render();
   }
   function syncSession() {
     const next = new CommentsApi(options);
@@ -7237,6 +7365,9 @@ export function initComments(options: CommentsOptions): CommentsController {
   instances.set(document, { scope, controller });
   (window as unknown as ControllerSlot)[CONTROLLER_KEY] = controller;
   restoring = !!shell || (!options.onboarding && openStore.get());
+  rememberedView = options.onboarding ? null : openStore.view(viewScope());
+  if (toolbarDismissed) rememberedView = null;
+  viewReady = true;
   scalePage();
   const cached = options.onboarding ? null : api.cached();
   knownThreads ||= cached !== null;

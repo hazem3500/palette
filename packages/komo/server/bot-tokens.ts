@@ -31,8 +31,12 @@ export async function authenticateBotToken(env: Env, bearer: string, project: st
   const stored = row?.token_hash ?? "0".repeat(64);
   check(row && stored.length === given.length && timingSafeEqual(new TextEncoder().encode(stored), new TextEncoder().encode(given)) && row.revoked_at === null && row.project === project, 401, "Invalid or revoked bot token.");
   const path = new URL(request.url).pathname;
-  // Read context, snapshots and identity; write replies only. No new threads,
-  // edits, deletes, reactions, settings or membership administration.
-  check(access && ((request.method === "GET" && (path === "/threads" || /^\/threads\/[^/]+\/snapshot(?:\/image)?$/.test(path) || path === "/me" || path === "/config")) || (request.method === "POST" && /^\/threads\/[^/]+\/comments$/.test(path))), 403, "Bot tokens may read threads and post replies only.");
+  const comments = /^\/threads\/[^/]+\/comments(?:\/[^/]+\/(image|reactions))?$/;
+  const action = comments.exec(path);
+  const read = request.method === "GET" && (path === "/threads" || path === "/me" || path === "/config" ||
+    /^\/threads\/[^/]+\/snapshot(?:\/image)?$/.test(path) || action?.[1] === "image");
+  const write = (request.method === "POST" && action && action[1] !== "image") ||
+    (request.method === "PUT" && action?.[1] === "image");
+  check(access && (read || write), 403, "Bot tokens may read threads, reply, attach reply images and react.");
   return row;
 }

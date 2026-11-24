@@ -55,7 +55,10 @@ const accountTokens = (await readdir("dist"))
   .filter((file) => /^account-tokens.*\.js$/.test(file))
   .map((file) => `dist/${file}`);
 const snapshots = (await readdir("dist"))
-  .filter((file) => /^snapshot-.*\.js$/.test(file))
+  .filter((file) => /^snapshot-.*\.js$/.test(file) && !file.startsWith("snapshot-annotate-"))
+  .map((file) => `dist/${file}`);
+const annotations = (await readdir("dist"))
+  .filter((file) => /^snapshot-annotate-.*\.js$/.test(file))
   .map((file) => `dist/${file}`);
 const threadSnapshots = (await readdir("dist"))
   .filter((file) => /^thread-snapshot-.*\.js$/.test(file))
@@ -102,6 +105,7 @@ const report = {
   optionalGeometry: await sizes(new Set(geometry)),
   optionalAccountTokens: await sizes(new Set(accountTokens)),
   optionalSnapshots: await sizes(new Set(snapshots)),
+  optionalImageMarkup: await sizes(new Set(annotations)),
   optionalSnapshotView: await sizes(new Set(threadSnapshots)),
   optionalFrameViewport: await sizes(new Set(frameIframe)),
   optionalLiveColors: await sizes(new Set(liveColors)),
@@ -234,7 +238,9 @@ await writeFile(
 // run at mount with the composer and account dialog they extend; 250,767 measured in CI, plus margin.
 // 250,900 -> 251,300: silent sign-in behind a sign-in proxy runs at mount, before the button shows
 // (+337: 250,812 -> 251,149 measured on Boat against main), plus CI margin.
-if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 251_300)
+// Area capture, rich comments, saved review state and image markup measured
+// 256,655 bytes in CI with the optional chunks included. Keep the startup limit.
+if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 257_000)
   throw new Error("Palette exceeds its core production consumer bundle budget.");
 // The inline-text feature adds a small button/state bridge to the optional
 // Design mode entry. Its editor remains a separate on-demand chunk below.
@@ -257,7 +263,8 @@ if (report.initial.gzip > 102_500 || report.coreFeatures.gzip > 251_300)
 // 8,150 -> 8,215: the pending changes card's hooks (row hover outline, Discard all held in Before for Undo and Redo); the card itself is in the export chunk (8,103 -> 8,166 on main bc089fe).
 // 8,215 -> 8,300: the footer wraps under 420px (count and Before/After, then tools and Comment), so Comment is never clipped; CSS only (8,165 -> 8,255 on main ff2f416).
 // 8,300 -> 8,400: Design mode also opens the props panel for build-time instrumented components (@hazem3500/palette/vite), found on the element's own window (8,255 -> 8,324).
-if (report.optionalDesignMode.gzip > 8_400)
+// Net style and token tracking brings Design mode to 8,449 bytes in CI.
+if (report.optionalDesignMode.gzip > 8_550)
   throw new Error("Palette's optional design mode chunk exceeds its gzip budget.");
 // Raised from 2,800 so text inside nested markup, links, and buttons can be edited in place.
 // 3,100: Before/After swaps edited text back, keeping nested markup (~80 bytes).
@@ -335,8 +342,12 @@ if (report.optionalAccountTokens.gzip > 5_850)
 if (report.optionalSnapshots.gzip > 4_900)
   throw new Error("Palette's comment snapshot chunk exceeds its gzip budget.");
 // Saved snapshots in the review UI (row thumbnails, the open card, the viewer, HTML as text) load the first time one is shown. 4,046 measured, plus ~3%.
-if (report.optionalSnapshotView.gzip > 4_200)
+// The wider draft thumbnail and comment-image viewer measure 4,290 bytes in CI.
+if (report.optionalSnapshotView.gzip > 4_400)
   throw new Error("Palette's snapshot view chunk exceeds its gzip budget.");
+// Image markup loads when a reviewer opens a draft image.
+if (!report.optionalImageMarkup.gzip || report.optionalImageMarkup.gzip > 4_000)
+  throw new Error("Palette's optional image markup chunk is missing or exceeds its gzip budget.");
 // Viewport mode loads only when Frame opens with frame.mode "iframe": the iframe, its stage, the
 // same-origin and fallback checks (X-Frame-Options, frame-ancestors, cross-origin redirects, timeout) and
 // the frame geometry Palette's page reads switch to. 2,216 measured, plus ~3%.

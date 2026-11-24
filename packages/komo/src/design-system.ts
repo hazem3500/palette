@@ -227,7 +227,7 @@ export interface ComponentAdapter {
 }
 
 export interface DesignSystem {
-  /** Opt in to experimental, reversible page-element previews: Figma-style resize handles and moves between elements. Default false. */
+  /** Set false to disable reversible resize handles and movement in Design mode. Default true. */
   experimentalGeometry?: boolean;
   /**
    * Canvas selection color for Design mode's hover and selection outlines, resize handles and move

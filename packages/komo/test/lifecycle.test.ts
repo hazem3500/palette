@@ -658,7 +658,7 @@ it("toggles Design mode with D, a configured key, and never while typing or disa
   };
   const mount = (extra: Partial<CommentsOptions> = {}) => {
     controller?.destroy();
-    controller = initComments({ ...options, onboarding: undefined, ...extra });
+    controller = initComments({ ...options, onboarding: undefined, restoreOpen: false, ...extra });
     const host = [...document.body.children].find((node) => node.shadowRoot) as HTMLElement;
     return { host, root: host.shadowRoot! };
   };
@@ -739,7 +739,7 @@ it("picks body-level portals outside pageRoot unless pickRoots narrows the bound
 it("keeps Palette's typing, pointer and focus events away from page listeners", () => {
   const mount = (extra: Partial<CommentsOptions> = {}) => {
     controller?.destroy();
-    controller = initComments({ ...options, onboarding: undefined, ...extra });
+    controller = initComments({ ...options, onboarding: undefined, restoreOpen: false, ...extra });
     const host = [...document.body.children].find((node) => node.shadowRoot)!;
     const field = document.createElement("textarea");
     const control = document.createElement("button");
@@ -1000,6 +1000,35 @@ it("opens threads inside the open sidebar, switches in place, and steps back wit
   // Then the sidebar closes: removed, or parked inert as the floating drawer.
   expect(!panel.isConnected || panel.parentElement!.inert).toBe(true);
   localStorage.clear();
+});
+
+it("reopens the selected comment after reload and respects a closed sidebar", async () => {
+  const { CommentsApi } = await import("../src/api");
+  const config = { ...options, project: "review-restore", onboarding: undefined };
+  const api = new CommentsApi(config);
+  const author = { id: "reviewer", name: "Reviewer", verified: true };
+  api.save({ token: "restore", user: author });
+  localStorage.setItem(`${api.sessionKey}:${JSON.stringify([config.repo, "local"])}:threads`, JSON.stringify({
+    token: api.token,
+    threads: [{
+      id: "here", page: "/", createdAt: 1, updatedAt: 1, resolved: false, resolvedBy: null,
+      anchor: { selector: "#target", text: "", x: .5, y: .5, width: 0, height: 0, pageX: 0, pageY: 0, viewportWidth: 1200 },
+      comments: [{ id: "msg", body: "Remember this", author, createdAt: 1, editedAt: null, reactions: {} }],
+    }],
+  }));
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+  layoutBody();
+  const root = () => [...document.body.children].find((node) => node.shadowRoot)!.shadowRoot!;
+  controller = initComments(config);
+  controller.open();
+  root().querySelector<HTMLButtonElement>(".thread-card")!.click();
+  controller.destroy();
+  controller = initComments(config);
+  expect(root().querySelector(".thread-pane .messages")?.textContent).toContain("Remember this");
+  controller.close();
+  controller.destroy();
+  controller = initComments(config);
+  expect(root().querySelector(".thread-pane .messages")).toBeNull();
 });
 
 it("keeps the floating dialog while the sidebar is closed", async () => {

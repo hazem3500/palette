@@ -112,8 +112,9 @@ async function picker(tab: Page, property: string) {
 
 const style = (tab: Page) => tab.locator("#card").evaluate(node => node.getAttribute("style"));
 const undo = (tab: Page) => tab.locator('.design-inspector__actions [aria-label="Undo"]');
-const closeFrom = async (tab: Page, property: string) => {
-  await tab.locator(`[data-field-property="${property}"] select[data-picker]`).click();
+const closePicker = async (tab: Page) => {
+  // Dismiss outside the popup without scrolling the field and reopening its picker.
+  await tab.locator(".design-inspector__heading").click();
   await expect.poll(() => tab.locator(".palette-tokens").count()).toBe(0);
 };
 /** Undo presses until Undo is disabled: how many entries the history held. */
@@ -138,7 +139,7 @@ describe.skipIf(!chrome).each(["floating", "reflow", "scaled"])("the color picke
     await tab.mouse.up();
     expect(await undo(tab).isDisabled()).toBe(false);
     const kept = await style(tab);
-    await closeFrom(tab, "background-color");
+    await closePicker(tab);
     expect(await style(tab)).toBe(kept);
     expect(await entries(tab)).toBe(1);
     expect(await style(tab)).toBe(original);
@@ -162,7 +163,7 @@ describe.skipIf(!chrome).each(["floating", "reflow", "scaled"])("the color picke
     expect(await style(tab)).toContain("rgba(43, 96, 97, 0.5)");
     // The popup offers the token whose value the color now matches only when it does.
     await expect.poll(() => tab.locator(".palette-color__match").isHidden()).toBe(true);
-    await closeFrom(tab, "background-color");
+    await closePicker(tab);
     expect(await entries(tab)).toBe(1);
     expect(await style(tab)).toBe(original);
 
@@ -235,7 +236,7 @@ describe.skipIf(!chrome).each(["floating", "reflow", "scaled"])("the color picke
     expect(await entries(tab)).toBe(1);
     await picker(tab, "background-color");
     await tab.getByRole("button", { name: "Document color #c2410c", exact: true }).click();
-    await closeFrom(tab, "background-color");
+    await closePicker(tab);
     await picker(tab, "border-color");
     await tab.getByRole("button", { name: "Recent color #c2410c", exact: true }).waitFor();
     await tab.keyboard.press("Escape");

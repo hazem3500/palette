@@ -8,6 +8,7 @@
 // when a snapshot is replaced) and shown through a blob URL that is revoked as soon
 // as its element leaves Palette's UI. HTML is only ever shown as text.
 import { button, el } from "./dom.js";
+import type { CapturedSnapshot } from "./snapshot.js";
 import type { Thread } from "./types.js";
 
 export interface SnapshotContext {
@@ -18,6 +19,7 @@ export interface SnapshotContext {
   origin(): string;
   /** Drafts whose capture is left out when they post. */
   dropped: WeakSet<Thread["anchor"]>;
+  annotate?(anchor: Thread["anchor"], shot: CapturedSnapshot): void;
   /** Opens a page through Palette's navigation (the host router when there is one). */
   go(url: URL): void;
   notify(text: string, action?: { label: string; run: () => void }): void;
@@ -25,7 +27,6 @@ export interface SnapshotContext {
   remove(thread: Thread): void;
 }
 type Snapshotted = Pick<Thread, "anchor" | "snapshot" | "page" | "id">;
-type Pending = { image?: string; html?: string; note?: string };
 
 const css = `.palette-snapshot{display:block;width:fit-content;margin-top:8px;padding:0;border:0;border-radius:6px;background:none;color:inherit;font:inherit;cursor:zoom-in;line-height:0}
 .palette-snapshot img{display:block;width:72px;height:48px;border-radius:6px;object-fit:contain;background:color-mix(in oklab,currentColor 8%,transparent);outline:1px solid color-mix(in oklab,currentColor 16%,transparent);outline-offset:-1px}
@@ -42,8 +43,10 @@ const css = `.palette-snapshot{display:block;width:fit-content;margin-top:8px;pa
 .palette-snapshot-code{box-sizing:border-box;max-height:160px;margin:0;padding:8px;overflow:auto;border-radius:6px;background:color-mix(in oklab,currentColor 8%,transparent);font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;scrollbar-width:thin}
 .palette-snapshot-code:focus-visible{outline:2px solid var(--accent,#bda6ef);outline-offset:2px}
 .palette-snapshot-text{justify-self:start;margin-top:8px;padding:4px 8px;border:0;border-radius:6px;background:color-mix(in oklab,currentColor 8%,transparent);color:inherit;font-family:inherit;font-size:11px;line-height:1.4;cursor:pointer}
-.palette-snapshot-draft{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:#999}
-.palette-snapshot-draft .palette-snapshot{margin:0}
+.palette-snapshot-draft{display:grid;grid-template-columns:1fr auto;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:#999}
+.palette-snapshot-draft .palette-snapshot{grid-column:1/-1;width:100%;margin:0;background:#ffffff08}
+.palette-snapshot-draft .palette-snapshot img{width:100%;height:94px;object-fit:contain}
+.palette-snapshot-draft .palette-snapshot:hover img{outline-color:var(--accent,#bda6ef)}
 .palette-snapshot-draft span{flex:1;min-width:0}
 .palette-snapshot-draft .icon{width:28px;height:28px}
 .palette-snapshot-viewer{box-sizing:border-box;max-width:min(1200px,calc(100vw - 32px));max-height:calc(100dvh - 32px);margin:auto;padding:12px;overflow:hidden;border:0;border-radius:16px;background:#242424;color:#eee;box-shadow:inset 0 0 0 1px #ffffff1f,0 24px 64px -16px rgb(0 0 0/55%);font:12px/1.4 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;pointer-events:auto;color-scheme:dark}
@@ -51,6 +54,9 @@ const css = `.palette-snapshot{display:block;width:fit-content;margin-top:8px;pa
 .palette-snapshot-viewer::backdrop{background:rgb(0 0 0/40%);pointer-events:auto}
 .palette-snapshot-viewer header{display:flex;align-items:center;gap:8px}
 .palette-snapshot-viewer h2{flex:1;margin:0;padding-left:4px;font-size:13px;font-weight:600}
+.palette-snapshot-viewer .secondary{background:#ffffff14;color:inherit}
+.palette-snapshot-viewer .primary{background:#e6dcfb;color:#242424}
+.palette-snapshot-viewer .row{flex-wrap:wrap;justify-content:flex-end}
 .palette-snapshot-viewer .icon{width:28px;height:28px;border-radius:8px;color:#bbb}
 .palette-snapshot-viewer .icon:hover{background:#ffffff14;color:#eee}
 .palette-snapshot-viewer .icon:focus-visible{outline:2px solid var(--accent,#bda6ef);outline-offset:-2px}
@@ -371,7 +377,7 @@ function fallback(thread: Snapshotted, context: SnapshotContext) {
 }
 
 /** The composer's pending capture, with a button that drops it before posting. */
-function draft(shot: Pending, anchor: Thread["anchor"], context: SnapshotContext) {
+function draft(shot: CapturedSnapshot, anchor: Thread["anchor"], context: SnapshotContext) {
   const row = el("div", "palette-snapshot-draft");
   const alt = snapshotAlt({ anchor });
   if (shot.image) {
@@ -379,11 +385,15 @@ function draft(shot: Pending, anchor: Thread["anchor"], context: SnapshotContext
     open.type = "button";
     open.dataset.ready = "";
     open.setAttribute("aria-haspopup", "dialog");
+    open.setAttribute("aria-label", "Open image preview");
     const image = el("img");
     image.alt = alt;
     image.src = shot.image;
     open.append(image);
-    open.addEventListener("click", () => void openSnapshotViewer(context.root, { src: shot.image, alt }));
+    open.addEventListener("click", () => {
+      if (context.annotate) context.annotate(anchor, shot);
+      else void openSnapshotViewer(context.root, { src: shot.image, alt });
+    });
     row.append(open);
   }
   row.append(el("span", "", shot.image ? (shot.html ? "Snapshot and HTML attached" : "Snapshot attached") : "HTML snapshot attached"));
@@ -411,6 +421,11 @@ function route(thread: Snapshotted, context: SnapshotContext) {
   return line;
 }
 
+export function mountCommentImage(slot: HTMLElement, context: SnapshotContext, url: string, anchor: Thread["anchor"]) {
+  style(context.root);
+  place(slot, thumbnail(url, { anchor }, context), context.root);
+}
+
 /**
  * Fills a slot Palette's core left for a snapshot. Modes: 0 a list row (images only),
  * 1 the open card (the image's thumbnail, or a button that opens the HTML as text),
@@ -418,7 +433,7 @@ function route(thread: Snapshotted, context: SnapshotContext) {
  * 4 a card whose element isn't on this page: its route, then how it looked.
  * Nothing is fetched until an image is on screen.
  */
-export function mountSnapshot(slot: HTMLElement, context: SnapshotContext, mode: number, thread: Snapshotted, capture?: Promise<Pending | null>) {
+export function mountSnapshot(slot: HTMLElement, context: SnapshotContext, mode: number, thread: Snapshotted, capture?: Promise<CapturedSnapshot | null>) {
   const { image, html } = thread.snapshot ?? {};
   style(context.root);
   if (mode === 3)

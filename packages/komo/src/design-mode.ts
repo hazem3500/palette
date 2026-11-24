@@ -175,7 +175,7 @@ export function createDesignMode(options: DesignModeOptions) {
   history.push = (...items) => { if (!redoing) future.length = 0; return record(...items); };
   const styleEdits = createStyleEdits(history);
   let geometry: ReturnType<typeof import("./design-geometry.js")["bindGeometry"]> | undefined;
-  if (options.design?.experimentalGeometry) void import("./design-geometry.js").then(module => {
+  if (options.design?.experimentalGeometry !== false && "replaceSync" in CSSStyleSheet.prototype && document.adoptedStyleSheets) void import("./design-geometry.js").then(module => {
     if (listeners.signal.aborted) return;
     geometry = module.bindGeometry({
       options, signal: listeners.signal, selected: () => selected,
@@ -203,7 +203,9 @@ export function createDesignMode(options: DesignModeOptions) {
     let values = changed.get(element);
     if (!values) changed.set(element, (values = new Map()));
     const value = element.style.getPropertyValue(property);
-    if (value === (originals.get(element)?.get(property)?.value ?? "")) values.delete(property);
+    const original = originals.get(element)?.get(property);
+    const priority = element.style.getPropertyPriority(property);
+    if (value === (original?.value ?? "") && priority === (original?.priority ?? "")) values.delete(property);
     else values.set(property, value);
     if (!values.size) changed.delete(element);
     renderOutlines();
@@ -273,7 +275,14 @@ export function createDesignMode(options: DesignModeOptions) {
     // Record token provenance before the override hides the page's own reference.
     const binding = reactPanelModule?.noteDesignTokenOverride(selected, property, value);
     styleEdits.override(control, binding?.undo);
-    selected.style.setProperty(property, value, binding?.priority ?? originals.get(selected)?.get(property)?.priority);
+    const original = originals.get(selected)?.get(property);
+    selected.style.setProperty(property, value, binding?.priority ?? original?.priority);
+    const applied = selected.style.getPropertyValue(property);
+    if (original && (applied === original.value || applied === original.computed)) {
+      restore(selected, property, original);
+      reactPanelModule?.clearCustomTokenOverride(selected, property);
+      reactPanelModule?.syncDesignTokenBinding(selected, property);
+    }
     track(selected, property);
     updateActions();
   }
@@ -879,7 +888,7 @@ export function createDesignMode(options: DesignModeOptions) {
     get active() { return active; },
     get selected() { return selected; },
     /** Previews that a reload would drop. */
-    get edited() { return history.length > 0; },
+    get edited() { return !!views?.tokens?.size || [...previewTargets.keys()].some(hasChanges); },
     /** Resolves once the property controls and selection keys have loaded; the panel then carries data-ready. */
     ready: Promise.all([ready, selectionReady]).then(() => { panel.dataset.ready = ""; }),
     destroy() {

@@ -106,7 +106,9 @@ describe.skipIf(!chrome).each([1280, 390])("the font size row at %ipx", width =>
     expect(await fontSize(tab)).toBe("25px");
     await tab.keyboard.press("Shift+ArrowDown");
     await tab.keyboard.press("ArrowDown");
-    expect(await fontSize(tab)).toBe("14px");
+    expect(await fontSize(tab)).toBe("");
+    expect(await input.inputValue()).toBe("14");
+    expect(await row.getAttribute("data-token-mode")).toBe("connected");
     await tab.keyboard.press("Enter");
 
     // Dragging the name scrubs, two pixels a step.
