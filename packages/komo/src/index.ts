@@ -651,7 +651,7 @@ export function initComments(options: CommentsOptions): CommentsController {
   const draftSharing = new WeakMap<Anchor, boolean>();
   const loadingDraftImages = new WeakSet<Anchor>();
   /** A slot the snapshot chunk fills (see mountSnapshot). */
-  const snapshotSlot = (mode: number, thread: Pick<Thread, "anchor" | "snapshot" | "page" | "id">, shot?: Promise<object | null>) => {
+  const snapshotSlot = (mode: number, thread: Pick<Thread, "anchor" | "snapshot" | "page" | "id">, shot?: Promise<import("./snapshot.js").CapturedSnapshot | null>) => {
     const slot = el("div");
     void loadSnapshotView().then((module) => destroyed || module.mountSnapshot(slot, snapshotContext, mode, thread, shot), () => {});
     return slot;

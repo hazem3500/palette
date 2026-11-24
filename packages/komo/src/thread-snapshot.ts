@@ -8,7 +8,7 @@
 // when a snapshot is replaced) and shown through a blob URL that is revoked as soon
 // as its element leaves Palette's UI. HTML is only ever shown as text.
 import { button, el } from "./dom.js";
-import type { ImageMarkup } from "./snapshot-annotate.js";
+import type { CapturedSnapshot } from "./snapshot.js";
 import type { Thread } from "./types.js";
 
 export interface SnapshotContext {
@@ -19,7 +19,7 @@ export interface SnapshotContext {
   origin(): string;
   /** Drafts whose capture is left out when they post. */
   dropped: WeakSet<Thread["anchor"]>;
-  annotate?(anchor: Thread["anchor"], shot: Pending): void;
+  annotate?(anchor: Thread["anchor"], shot: CapturedSnapshot): void;
   /** Opens a page through Palette's navigation (the host router when there is one). */
   go(url: URL): void;
   notify(text: string, action?: { label: string; run: () => void }): void;
@@ -27,7 +27,6 @@ export interface SnapshotContext {
   remove(thread: Thread): void;
 }
 type Snapshotted = Pick<Thread, "anchor" | "snapshot" | "page" | "id">;
-type Pending = { image?: string; html?: string; note?: string; markup?: ImageMarkup };
 
 const css = `.palette-snapshot{display:block;width:fit-content;margin-top:8px;padding:0;border:0;border-radius:6px;background:none;color:inherit;font:inherit;cursor:zoom-in;line-height:0}
 .palette-snapshot img{display:block;width:72px;height:48px;border-radius:6px;object-fit:contain;background:color-mix(in oklab,currentColor 8%,transparent);outline:1px solid color-mix(in oklab,currentColor 16%,transparent);outline-offset:-1px}
@@ -378,7 +377,7 @@ function fallback(thread: Snapshotted, context: SnapshotContext) {
 }
 
 /** The composer's pending capture, with a button that drops it before posting. */
-function draft(shot: Pending, anchor: Thread["anchor"], context: SnapshotContext) {
+function draft(shot: CapturedSnapshot, anchor: Thread["anchor"], context: SnapshotContext) {
   const row = el("div", "palette-snapshot-draft");
   const alt = snapshotAlt({ anchor });
   if (shot.image) {
@@ -434,7 +433,7 @@ export function mountCommentImage(slot: HTMLElement, context: SnapshotContext, u
  * 4 a card whose element isn't on this page: its route, then how it looked.
  * Nothing is fetched until an image is on screen.
  */
-export function mountSnapshot(slot: HTMLElement, context: SnapshotContext, mode: number, thread: Snapshotted, capture?: Promise<Pending | null>) {
+export function mountSnapshot(slot: HTMLElement, context: SnapshotContext, mode: number, thread: Snapshotted, capture?: Promise<CapturedSnapshot | null>) {
   const { image, html } = thread.snapshot ?? {};
   style(context.root);
   if (mode === 3)
